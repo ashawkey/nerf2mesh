@@ -3,7 +3,7 @@
 
 This repository contains a PyTorch re-implementation of the paper: [Delicate Textured Mesh Recovery from NeRF via Adaptive Surface Refinement](https://ashawkey.github.io/nerf2mesh/paper.pdf).
 
-### [Project Page](https://ashawkey.github.io/nerf2mesh/) | [Paper](https://ashawkey.github.io/nerf2mesh/paper.pdf) | [Models](https://huggingface.co/ashawkey/nerf2mesh/tree/main/scenes) | [Arxiv](TODO)
+### [Project Page](https://ashawkey.github.io/nerf2mesh/) | [Paper](https://huggingface.co/ashawkey/nerf2mesh/resolve/main/paper.pdf) | [Models](https://huggingface.co/ashawkey/nerf2mesh/tree/main/scenes) | [Arxiv](TODO)
 
 ![](assets/teaser.jpg)
 
