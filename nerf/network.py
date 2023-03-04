@@ -38,10 +38,8 @@ class NeRFNetwork(NeRFRenderer):
         super().__init__(opt)
 
         # sigma and feature network
-        
         self.encoder, self.in_dim_density = get_encoder("hashgrid", level_dim=1, desired_resolution=2048 * self.bound, interpolation='smoothstep')
         self.encoder_color, self.in_dim_color = get_encoder("hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
-
         self.sigma_net = MLP(self.in_dim_density, 1, 32, 2, bias=False)
 
         # color network

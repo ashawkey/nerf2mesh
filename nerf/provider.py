@@ -26,6 +26,11 @@ def visualize_poses(poses, size=0.1, bound=1):
     box.colors = np.array([[128, 128, 128]] * len(box.entities))
     objects = [axes, box]
 
+    if bound > 1:
+        unit_box = trimesh.primitives.Box(extents=[2]*3).as_outline()
+        unit_box.colors = np.array([[128, 128, 128]] * len(unit_box.entities))
+        objects.append(unit_box)
+
     for pose in poses:
         # a camera is visualized with 8 line segments.
         pos = pose[:3, 3]

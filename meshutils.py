@@ -188,7 +188,7 @@ def clean_mesh(verts, faces, v_pct=1, min_f=8, min_d=5, repair=True, remesh=True
     return verts, faces
 
 
-def decimate_and_subdivide_mesh(verts, faces, mask, decimate_ratio=0.1, subdivide_size=0.01, remesh_size=0.02):
+def decimate_and_refine_mesh(verts, faces, mask, decimate_ratio=0.1, refine_size=0.01, refine_remesh_size=0.02):
     # verts: [N, 3]
     # faces: [M, 3]
     # mask: [M], 0 denotes do nothing, 1 denotes decimation, 2 denotes subdivision
@@ -205,20 +205,20 @@ def decimate_and_subdivide_mesh(verts, faces, mask, decimate_ratio=0.1, subdivid
     if decimate_ratio > 0:
         ms.meshing_decimation_quadric_edge_collapse(targetfacenum=int((1 - decimate_ratio) * (mask == 1).sum()), selected=True)
 
-    if remesh_size > 0:
-        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(remesh_size), selectedonly=True)
+    if refine_remesh_size > 0:
+        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(refine_remesh_size), selectedonly=True)
 
     # repair
     ms.set_selection_none(allfaces=True)
     ms.meshing_repair_non_manifold_edges(method=0)
     ms.meshing_repair_non_manifold_vertices(vertdispratio=0)
     
-    # subdivide 
-    if subdivide_size > 0:
+    # refine 
+    if refine_size > 0:
         ms.compute_selection_by_condition_per_face(condselect='fq == 2')
-        ms.meshing_surface_subdivision_midpoint(threshold=pml.AbsoluteValue(subdivide_size), selected=True)
+        ms.meshing_surface_subdivision_midpoint(threshold=pml.AbsoluteValue(refine_size), selected=True)
 
-        # ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(subdivide_size), selectedonly=True)
+        # ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(refine_size), selectedonly=True)
 
     # extract mesh
     m = ms.current_mesh()

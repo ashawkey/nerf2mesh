@@ -11,8 +11,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch_efficient_distloss import flatten_eff_distloss
-
 import raymarching
 import nvdiffrast.torch as dr
 
@@ -109,8 +107,6 @@ class NeRFRenderer(nn.Module):
             else:
                 self.glctx = dr.RasterizeGLContext(output_db=False) # will crash if using GUI...
 
-            self.depth_layers = opt.depth_layers
-
             # sequentially load cascaded meshes
             vertices = []
             triangles = []
@@ -190,7 +186,7 @@ class NeRFRenderer(nn.Module):
         print(f'[INFO] update_aabb: {self.aabb_train.cpu().numpy().tolist()}')
 
     @torch.no_grad()
-    def subdivide_and_decimate(self):
+    def refine_and_decimate(self):
 
         assert self.opt.stage > 0
         device = self.vertices.device
@@ -208,21 +204,21 @@ class NeRFRenderer(nn.Module):
         cnt_mask = cnt_mask[:self.f_cumsum[1]]
 
         # find a threshold to decide whether we perform subdivision / decimation.
-        thresh_subdivide = np.percentile(errors[cnt_mask], 90)
+        thresh_refine = np.percentile(errors[cnt_mask], 90)
         thresh_decimate = np.percentile(errors[cnt_mask], 50)
 
         mask = np.zeros_like(errors)
-        mask[(errors > thresh_subdivide) & cnt_mask] = 2
+        mask[(errors > thresh_refine) & cnt_mask] = 2
         mask[(errors < thresh_decimate) & cnt_mask] = 1
 
-        print(f'[INFO] faces to decimate {(mask == 1).sum()}, faces to subdivide {(mask == 2).sum()}')
+        print(f'[INFO] faces to decimate {(mask == 1).sum()}, faces to refine {(mask == 2).sum()}')
 
         if self.bound <= 1:
 
             # mesh = trimesh.Trimesh(v, f, process=False)
             # mesh.export(os.path.join(self.opt.workspace, 'mesh_stage0', 'mesh_0_before_updated.ply'))
 
-            v, f = decimate_and_subdivide_mesh(v, f, mask, decimate_ratio=self.opt.subdivide_decimate_ratio, subdivide_size=self.opt.subdivide_size, remesh_size=self.opt.remesh_size)
+            v, f = decimate_and_refine_mesh(v, f, mask, decimate_ratio=self.opt.refine_decimate_ratio, refine_size=self.opt.refine_size, refine_remesh_size=self.opt.refine_remesh_size)
             # export
             mesh = trimesh.Trimesh(v, f, process=False)
             mesh.export(os.path.join(self.opt.workspace, 'mesh_stage0', 'mesh_0_updated.ply'))
@@ -244,7 +240,7 @@ class NeRFRenderer(nn.Module):
                 cur_f = f[self.f_cumsum[cas]:self.f_cumsum[cas+1]] - self.v_cumsum[cas]
 
                 if cas == 0:
-                    cur_v, cur_f = decimate_and_subdivide_mesh(cur_v, cur_f, mask, decimate_ratio=self.opt.subdivide_decimate_ratio, subdivide_size=self.opt.subdivide_size, remesh_size=self.opt.remesh_size)
+                    cur_v, cur_f = decimate_and_refine_mesh(cur_v, cur_f, mask, decimate_ratio=self.opt.refine_decimate_ratio, refine_size=self.opt.refine_size, refine_remesh_size=self.opt.refine_remesh_size)
 
                 mesh = trimesh.Trimesh(cur_v, cur_f, process=False)
                 mesh.export(os.path.join(self.opt.workspace, 'mesh_stage0', f'mesh_{cas}_updated.ply'))

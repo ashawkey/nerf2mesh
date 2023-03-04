@@ -694,7 +694,7 @@ class Trainer(object):
             pred_rgb = outputs['image']
             loss = self.criterion(pred_rgb, gt_rgb).mean(-1) # [H, W]
 
-            if self.opt.subdivide:
+            if self.opt.refine:
                 self.model.update_triangles_errors(loss.detach())
 
         loss = loss.mean()
@@ -1163,10 +1163,10 @@ class Trainer(object):
                 pbar.update(loader.batch_size)
             
             # if stage1, periodically cleaning mesh and re-init model
-            if self.opt.stage == 1 and self.opt.subdivide and self.global_step in self.opt.subdivide_steps:
+            if self.opt.stage == 1 and self.opt.refine and self.global_step in self.opt.refine_steps:
                 
-                self.log(f'[INFO] subdivide and decimate mesh at {self.global_step} step')
-                self.model.subdivide_and_decimate()
+                self.log(f'[INFO] refine and decimate mesh at {self.global_step} step')
+                self.model.refine_and_decimate()
 
                 # reinit optim since params changed.
                 self.optimizer = self.optimizer_fn(self.model)

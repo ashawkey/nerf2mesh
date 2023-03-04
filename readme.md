@@ -53,18 +53,18 @@ First time running will take some time to compile the CUDA extensions.
 ### Stage0 (NeRF, continuous, volumetric rendering), this stage exports a coarse mesh under <workspace>/mesh_stage0/
 
 # nerf
-python main_nerf.py data/nerf_synthetic/lego/ --workspace trial_syn_lego/ -O --bound 1 --scale 0.8 --dt_gamma 0 --stage 0 --lambda_tv 1e-8
+python main.py data/nerf_synthetic/lego/ --workspace trial_syn_lego/ -O --bound 1 --scale 0.8 --dt_gamma 0 --stage 0 --lambda_tv 1e-8
 
 # colmap
-python main_nerf.py data/garden/ --workspace trial_360_garden -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --downscale 4 --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+python main.py data/garden/ --workspace trial_360_garden -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --downscale 4 --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
 
-### Stage1 (NVdiffrast, binarized, rasterization), this stage exports a fine mesh with textures under <workspace>/mesh_stage1/
+### Stage1 (Mesh, binarized, rasterization), this stage exports a fine mesh with textures under <workspace>/mesh_stage1/
 
 # nerf
-python main_nerf.py data/nerf_synthetic/lego/ --workspace trial_syn_lego/ -O --bound 1 --scale 0.8 --dt_gamma 0 --stage 1
+python main.py data/nerf_synthetic/lego/ --workspace trial_syn_lego/ -O --bound 1 --scale 0.8 --dt_gamma 0 --stage 1
 
 # colmap
-python main_nerf.py data/garden/ --workspace trial_360_garden   -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --downscale 4 --stage 1 --iters 10000
+python main.py data/garden/ --workspace trial_360_garden   -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --downscale 4 --stage 1 --iters 10000
 
 ### Web Renderer
 # you can simply open <workspace>/mesh_stage1/mesh.obj with a 3D viewer to visualize the diffuse texture.
@@ -72,21 +72,36 @@ python main_nerf.py data/garden/ --workspace trial_360_garden   -O --data_format
 ```
 
 ### Custom Dataset
+
+**Tips:**
+* To get best mesh quality, you may need to adjust `--scale` to let the most interested object fall inside the unit box `[-1, 1]^3`, which can be visualized by appending `--vis_pose`.
+* To better model background (especially for outdoor scenes), you may need to adjust `--bound` to let most sparse points fall into the full box `[-bound, bound]^3`, which can also be visualized by appending `--vis_pose`.
+* For forward-facing dataset, remove `--enable_cam_center` so the scene center is determined by sparse points which is more suitable.
+
 ```bash
 # prepare your video or images under /data/custom, and run colmap (assumed installed):
 python scripts/colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap # if use video
 python scripts/colmap2nerf.py --images ./data/custom/images/ --run_colmap # if use images
 
 # recommended options for outdoor 360-inwarding captures
-python main_nerf.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
 
-python main_nerf.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 1 --iters 10000 --lambda_normal 1e-2
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 1 --iters 10000 --lambda_normal 1e-3
 ```
 
 ### Advanced Usage
 ```bash
 ### -O: the recommended setting, equals
---fp16 --preload --mark_untrained --random_image_batch --adaptive_num_rays --subdivide --mesh_visibility_culling
+--fp16 --preload --mark_untrained --random_image_batch --adaptive_num_rays --refine --mesh_visibility_culling
+
+### load checkpoint
+# by default we load the latest checkpoint in the workspace, but you can specify it by:
+--ckpt trial/checkpoints/xxx.pth # this can be useful to load stage 0 ckpt after finishing stage 1.
+
+### testing
+--test # test, save video and mesh
+--test_no_video # do not save video
+--test_no_mesh # do not save mesh
 
 ### dataset related
 --data_format [colmap|nerf] # dataset format
@@ -123,11 +138,11 @@ python main_nerf.py data/custom/ --workspace trial_custom -O --data_format colma
 ### fine mesh exportation
 --texture_size 4096 # max texture image resolution
 --ssaa 2 # super-sampling anti-alias ratio
---subdivide_size 0.01 # finest edge len at subdivision
---subdivide_decimate_ratio 0.1 # decimate ratio at each subdivide step
---remesh_size 0.02 # remesh edge len after decimation
+--refine_size 0.01 # finest edge len at subdivision
+--refine_decimate_ratio 0.1 # decimate ratio at each refine step
+--refine_remesh_size 0.02 # remesh edge len after decimation
 
-### Depth supervision (only for colmap dataset)
+### Depth supervision (colmap dataset only)
 
 # generate downscaled images ('images` --> `images_4`)
 python scripts/downscale.py data/<name> --downscale 4
@@ -141,10 +156,10 @@ cd ..
 python depth_tools/extract_depth.py --in_dir data/<name>/images_4 --out_dir data/<name>/depths
 
 # enable dense depth training
-python main_nerf.py data/<name> -O --bound 16 --data_format colmap --enable_dense_depth
+python main.py data/<name> -O --bound 16 --data_format colmap --enable_dense_depth
 ```
 
-Please check the `scripts` directory for more examples on common datasets, and check `main_nerf.py` for all options.
+Please check the `scripts` directory for more examples on common datasets, and check `main.py` for all options.
 
 # Acknowledgement
 
