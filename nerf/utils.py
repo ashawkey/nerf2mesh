@@ -584,6 +584,12 @@ class Trainer(object):
         self.log(self.model)
 
         if self.workspace is not None:
+
+            # stage1 model will always first load stage0 best model
+            if self.opt.stage == 1:
+                self.log("[INFO] Loading stage 0 model to init stage 1 ...")
+                self.load_checkpoint(f"{self.ckpt_path}/{self.name.replace('stage1', 'stage0')}.pth", model_only=True)
+
             if self.use_checkpoint == "scratch":
                 self.log("[INFO] Training from scratch ...")
             elif self.use_checkpoint == "latest":
@@ -1367,13 +1373,15 @@ class Trainer(object):
                 self.log(f"[WARN] no evaluated results found, skip saving best checkpoint.")
             
     def load_checkpoint(self, checkpoint=None, model_only=False):
-        if checkpoint is None:
-            checkpoint_list = sorted(glob.glob(f'{self.ckpt_path}/*.pth')) # may find ckpts from different stages...
+
+        if checkpoint is None: # load latest
+            checkpoint_list = sorted(glob.glob(f'{self.ckpt_path}/*_stage{self.opt.stage}*.pth')) 
+
             if checkpoint_list:
                 checkpoint = checkpoint_list[-1]
                 self.log(f"[INFO] Latest checkpoint is {checkpoint}")
             else:
-                self.log("[WARN] No checkpoint found, model randomly initialized.")
+                self.log("[WARN] No checkpoint found, abort loading latest model.")
                 return
 
         checkpoint_dict = torch.load(checkpoint, map_location=self.device)
@@ -1402,8 +1410,8 @@ class Trainer(object):
                 self.model.mean_density = checkpoint_dict['mean_density']
         
         # only load model if stage is different...
-        if checkpoint_dict['stage'] != self.opt.stage:
-            return
+        # if checkpoint_dict['stage'] != self.opt.stage:
+        #     return
 
         if model_only:
             return

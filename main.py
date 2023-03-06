@@ -131,6 +131,7 @@ if __name__ == '__main__':
     
     # best rendering quality at the sacrifice of mesh quality
     if opt.wo_smooth:
+        opt.lambda_offsets = 0
         opt.lambda_lap = 0
         opt.lambda_normal = 0
     

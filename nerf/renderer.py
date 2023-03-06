@@ -115,7 +115,7 @@ class NeRFRenderer(nn.Module):
             for cas in range(self.cascade):
                 
                 _updated_mesh_path = os.path.join(self.opt.workspace, 'mesh_stage0', f'mesh_{cas}_updated.ply') if self.opt.mesh == '' else self.opt.mesh
-                if os.path.exists(_updated_mesh_path):
+                if os.path.exists(_updated_mesh_path) and self.opt.ckpt != 'scratch':
                     mesh = trimesh.load(_updated_mesh_path, force='mesh', skip_material=True, process=False)
                 else: # base (not updated)
                     mesh = trimesh.load(os.path.join(self.opt.workspace, 'mesh_stage0', f'mesh_{cas}.ply'), force='mesh', skip_material=True, process=False)
