@@ -712,7 +712,7 @@ class Trainer(object):
             if self.opt.lambda_specular > 0:
                 specs = outputs['speculars'] # [N, 3] in [0, 1]
                 if specs is not None:
-                    loss = loss + self.opt.lambda_specular * specs.sum(-1).mean()
+                    loss = loss + self.opt.lambda_specular * (specs ** 2).sum(-1).mean()
  
         if self.opt.stage == 1:
             # perceptual loss

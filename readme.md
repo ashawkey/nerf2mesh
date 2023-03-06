@@ -1,9 +1,9 @@
 # nerf2mesh
 
 
-This repository contains a PyTorch re-implementation of the paper: [Delicate Textured Mesh Recovery from NeRF via Adaptive Surface Refinement](https://ashawkey.github.io/nerf2mesh/paper.pdf).
+This repository contains a PyTorch re-implementation of the paper: [Delicate Textured Mesh Recovery from NeRF via Adaptive Surface Refinement](https://arxiv.org/abs/2303.02091).
 
-### [Project Page](https://ashawkey.github.io/nerf2mesh/) | [Paper](https://huggingface.co/ashawkey/nerf2mesh/resolve/main/paper.pdf) | [Models](https://huggingface.co/ashawkey/nerf2mesh/tree/main/scenes) | [Arxiv](TODO)
+### [Project Page](https://ashawkey.github.io/nerf2mesh/) | [Arxiv](https://arxiv.org/abs/2303.02091) | [Paper](https://huggingface.co/ashawkey/nerf2mesh/resolve/main/paper.pdf) | [Models](https://huggingface.co/ashawkey/nerf2mesh/tree/main/scenes) 
 
 ![](assets/teaser.jpg)
 
@@ -84,9 +84,14 @@ python scripts/colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap # if 
 python scripts/colmap2nerf.py --images ./data/custom/images/ --run_colmap # if use images
 
 # recommended options for outdoor 360-inwarding captures
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
 
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 1 --iters 10000 --lambda_normal 1e-3
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --stage 1 --iters 10000 --lambda_normal 1e-3
+
+# recommended options for forward-facing captures
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 4 --scale 0.3 --stage 0 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 4 --scale 0.3 --stage 1 --iters 10000 --lambda_normal 1e-3
 ```
 
 ### Advanced Usage
@@ -172,6 +177,7 @@ Please check the `scripts` directory for more examples on common datasets, and c
 @article{tang2022nerf2mesh,
   title={Delicate Textured Mesh Recovery from NeRF via Adaptive Surface Refinement},
   author={Tang, Jiaxiang and Zhou, Hang and Chen, Xiaokang and Hu, Tianshu and Ding, Errui and Wang, Jingdong and Zeng, Gang},
+  journal={arXiv preprint arXiv:2303.02091},
   year={2022}
 }
 ```

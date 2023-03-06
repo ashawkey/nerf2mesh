@@ -64,7 +64,7 @@ if __name__ == '__main__':
     # stage 0 regularizations
     parser.add_argument('--lambda_density', type=float, default=0, help="loss scale")
     parser.add_argument('--lambda_entropy', type=float, default=0, help="loss scale")
-    parser.add_argument('--lambda_tv', type=float, default=1e-7, help="loss scale")
+    parser.add_argument('--lambda_tv', type=float, default=1e-8, help="loss scale")
     parser.add_argument('--lambda_depth', type=float, default=0.1, help="loss scale")
     parser.add_argument('--lambda_specular', type=float, default=1e-5, help="loss scale")
 
@@ -131,11 +131,8 @@ if __name__ == '__main__':
     
     # best rendering quality at the sacrifice of mesh quality
     if opt.wo_smooth:
-        opt.lambda_tv = 0
-        opt.lambda_offsets = 0
         opt.lambda_lap = 0
         opt.lambda_normal = 0
-        opt.lambda_edgelen = 0
     
     if opt.enable_sparse_depth:
         print(f'[WARN] disable random image batch when depth supervision is used!')
