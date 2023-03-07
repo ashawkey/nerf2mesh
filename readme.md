@@ -7,7 +7,10 @@ This repository contains a PyTorch re-implementation of the paper: [Delicate Tex
 
 ![](assets/teaser.jpg)
 
+![vis](https://user-images.githubusercontent.com/25863658/223434084-a487cb0f-2408-41c6-bd39-93d017641eec.jpg)
+
 # Install
+
 ```bash
 git clone https://github.com/ashawkey/nerf2mesh.git
 cd nerf2mesh
