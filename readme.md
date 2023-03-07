@@ -100,8 +100,9 @@ python main.py data/custom/ --workspace trial_custom -O --data_format colmap --b
 --fp16 --preload --mark_untrained --random_image_batch --adaptive_num_rays --refine --mesh_visibility_culling
 
 ### load checkpoint
-# by default we load the latest checkpoint in the workspace, but you can specify it by:
---ckpt trial/checkpoints/xxx.pth # this can be useful to load stage 0 ckpt after finishing stage 1.
+--ckpt latest # by default we load the latest checkpoint in the workspace
+--ckpt scratch # train from scratch. For stage 1, this will still load the stage 0 model as an initialization.
+--ckpt trial/checkpoints/xxx.pth # specify it by path
 
 ### testing
 --test # test, save video and mesh

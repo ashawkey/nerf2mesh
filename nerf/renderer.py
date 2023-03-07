@@ -715,12 +715,8 @@ class NeRFRenderer(nn.Module):
         else:
             ind_code = None
 
-        # deltas = 2 * np.sqrt(3) / max_steps
-
         results = {}
 
-        # only rast one layer...
-        # vertices = from_differential(self.M, self.u, 'Cholesky') # [N, 3]
         vertices = self.vertices + self.vertices_offsets # [N, 3]
 
         vertices_clip = torch.matmul(F.pad(vertices, pad=(0, 1), mode='constant', value=1.0), torch.transpose(mvp, 0, 1)).float().unsqueeze(0) # [1, N, 4]
@@ -735,17 +731,16 @@ class NeRFRenderer(nn.Module):
         rgbs = torch.zeros(h * w, 3, device=device, dtype=torch.float32)
 
         if mask_flatten.any():
-            # do not allow NeRF to train the vertices_offsets, let diff-render train it.
             with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                mask_rgbs, masked_specular = self.rgb(xyzs[mask_flatten].detach(), dirs[mask_flatten], ind_code, shading)
+                mask_rgbs, masked_specular = self.rgb(
+                    xyzs[mask_flatten] if self.opt.enable_offset_nerf_grad else xyzs[mask_flatten].detach(), 
+                    dirs[mask_flatten], ind_code, shading)
 
             rgbs[mask_flatten] = mask_rgbs.float()
 
-        # sigmas = sigmas.view(1, h, w, 1)
         rgbs = rgbs.view(1, h, w, 3)
         alphas = mask.float().detach()
         
-        # antialias (strangely it may lead to values < 0 or > 1, so do the clamp.)
         alphas = dr.antialias(alphas, rast, vertices_clip, self.triangles, pos_gradient_boost=self.opt.pos_gradient_boost).squeeze(0).clamp(0, 1)
         rgbs = dr.antialias(rgbs, rast, vertices_clip, self.triangles, pos_gradient_boost=self.opt.pos_gradient_boost).squeeze(0).clamp(0, 1)
 
@@ -766,13 +761,11 @@ class NeRFRenderer(nn.Module):
         self.triangles_errors_id = trig_id
 
         image = image + T * bg_color
-        # depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-5)
         
         image = image.view(*prefix, 3)
         depth = depth.view(*prefix)
 
         results['depth'] = depth
-        # results['weights_sum'] = 1 - T.squeeze(-1)
         results['image'] = image
 
         # tmp: visualize accumulated triangle error by abusing depth

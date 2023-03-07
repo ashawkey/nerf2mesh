@@ -55,6 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--density_thresh', type=float, default=10, help="threshold for density grid to be occupied")
     parser.add_argument('--diffuse_step', type=int, default=1000, help="training iters that only trains diffuse color for better initialization")
     parser.add_argument('--background', type=str, default='random', choices=['white', 'random'], help="training background mode")
+    parser.add_argument('--enable_offset_nerf_grad', action='store_true', help="allow grad to pass through nerf to train vertices offsets in stage 1, only work for small meshes (e.g., synthetic dataset)")
     
     # batch size related
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
