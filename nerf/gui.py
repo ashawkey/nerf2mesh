@@ -266,20 +266,6 @@ class NeRFGUI:
 
                         dpg.add_text("", tag="_log_ckpt")
                     
-                    # save mesh
-                    with dpg.group(horizontal=True):
-                        dpg.add_text("Marching Cubes: ")
-
-                        def callback_mesh(sender, app_data):
-                            self.trainer.save_mesh(resolution=256, threshold=10)
-                            dpg.set_value("_log_mesh", "saved " + f'{self.trainer.name}_{self.trainer.epoch}.ply')
-                            self.trainer.epoch += 1 # use epoch to indicate different calls.
-
-                        dpg.add_button(label="mesh", tag="_button_mesh", callback=callback_mesh)
-                        dpg.bind_item_theme("_button_mesh", theme_button)
-
-                        dpg.add_text("", tag="_log_mesh")
-
                     with dpg.group(horizontal=True):
                         dpg.add_text("", tag="_log_train_log")
 

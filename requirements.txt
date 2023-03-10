@@ -17,7 +17,7 @@ opencv-python
 imageio
 imageio-ffmpeg
 pymeshlab
-torch_scatter
+torch-scatter
 xatlas
 scikit-learn
 torchmetrics

@@ -122,7 +122,7 @@ python main.py data/custom/ --workspace trial_custom -O --data_format colmap --b
 
 ### visualization 
 --vis_pose # viusalize camera poses and sparse points (sparse points are colmap dataset only)
---gui # open gui
+--gui # open gui (only for testing, training in gui is not well supported!)
 
 ### balance between surface quality / rendering quality
 
