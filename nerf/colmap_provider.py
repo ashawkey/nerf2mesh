@@ -154,6 +154,14 @@ class ColmapDataset:
         imkeys = imkeys[exist_mask]
         img_paths = img_paths[exist_mask]
 
+        # load masks
+        mask_folder = os.path.join(self.root_path, 'mask')
+        if os.path.exists(mask_folder):
+            print(f'[INFO] use mask under folder {mask_folder}')
+            mask_paths = np.array([os.path.join(self.root_path, 'mask', os.path.splitext(os.path.basename(p))[0] + '.png') for p in img_paths])
+        else:
+            mask_paths = None
+
         # read intrinsics
         intrinsics = []
         for k in imkeys:
@@ -404,6 +412,8 @@ class ColmapDataset:
                 self.poses = self.poses[train_ids]
                 self.intrinsics = self.intrinsics[train_ids]
                 img_paths = img_paths[train_ids]
+                if mask_paths is not None:
+                    mask_paths = mask_paths[train_ids]
                 if self.sparse_depth_info is not None:
                     self.sparse_depth_info = self.sparse_depth_info[train_ids]
                 if self.dense_depth_info is not None:
@@ -414,6 +424,8 @@ class ColmapDataset:
                 self.poses = self.poses[val_ids]
                 self.intrinsics = self.intrinsics[val_ids]
                 img_paths = img_paths[val_ids]
+                if mask_paths is not None:
+                    mask_paths = mask_paths[val_ids]
                 if self.sparse_depth_info is not None:
                     self.sparse_depth_info = self.sparse_depth_info[val_ids]
                 if self.dense_depth_info is not None:
@@ -425,7 +437,7 @@ class ColmapDataset:
             # read images
             self.images = []
 
-            for f in tqdm.tqdm(img_paths, desc=f'Loading {self.type} data'):
+            for i, f in tqdm.tqdm(enumerate(img_paths), desc=f'Loading {self.type} data'):
 
                 image = cv2.imread(f, cv2.IMREAD_UNCHANGED) # [H, W, 3] o [H, W, 4]
 
@@ -434,6 +446,14 @@ class ColmapDataset:
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 else:
                     image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+
+                # if mask is available, load as the alpha channel
+                if mask_paths is not None:
+                    m_path = mask_paths[i]
+                    mask = cv2.imread(m_path, cv2.IMREAD_UNCHANGED) # [H, W]
+                    if len(mask.shape) == 2: 
+                        mask = mask[..., None]
+                    image = np.concatenate([image, mask[..., :1]], axis=-1)
 
                 if image.shape[0] != self.H or image.shape[1] != self.W:
                     image = cv2.resize(image, (self.W, self.H), interpolation=cv2.INTER_AREA)
@@ -537,7 +557,6 @@ class ColmapDataset:
             if self.training:
                 C = self.images.shape[-1]
                 images = images.view(-1, C)
-
 
             results['images'] = images
         

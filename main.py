@@ -54,6 +54,7 @@ if __name__ == '__main__':
     parser.add_argument('--dt_gamma', type=float, default=1/256, help="dt_gamma (>=0) for adaptive ray marching. set to 0 to disable, >0 to accelerate rendering (but usually with worse quality)")
     parser.add_argument('--density_thresh', type=float, default=10, help="threshold for density grid to be occupied")
     parser.add_argument('--diffuse_step', type=int, default=1000, help="training iters that only trains diffuse color for better initialization")
+    parser.add_argument('--diffuse_only', action='store_true', help="only train diffuse color by overriding --diffuse_step")
     parser.add_argument('--background', type=str, default='random', choices=['white', 'random'], help="training background mode")
     parser.add_argument('--enable_offset_nerf_grad', action='store_true', help="allow grad to pass through nerf to train vertices offsets in stage 1, only work for small meshes (e.g., synthetic dataset)")
     
@@ -89,7 +90,7 @@ if __name__ == '__main__':
     # stage 0
     parser.add_argument('--mcubes_reso', type=int, default=512, help="resolution for marching cubes")
     parser.add_argument('--env_reso', type=int, default=256, help="max layers (resolution) for env mesh")
-    parser.add_argument('--decimate_target', type=int, default=3e5, help="decimate target for number of triangles, <=0 to disable")
+    parser.add_argument('--decimate_target', type=float, default=3e5, help="decimate target for number of triangles, <=0 to disable")
     parser.add_argument('--mesh_visibility_culling', action='store_true', help="cull mesh faces based on visibility in training dataset")
     parser.add_argument('--visibility_mask_dilation', type=int, default=5, help="visibility dilation")
     parser.add_argument('--clean_min_f', type=int, default=8, help="mesh clean: min face count for isolated mesh")

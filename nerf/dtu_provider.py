@@ -195,8 +195,8 @@ class NeRFDataset:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
                 # if use mask, add as an alpha channel
-                # mask = cv2.imread(m_path, cv2.IMREAD_UNCHANGED) # [H, W, 3]
-                # image = np.concatenate([image, mask[..., :1]], axis=-1)
+                mask = cv2.imread(m_path, cv2.IMREAD_UNCHANGED) # [H, W, 3]
+                image = np.concatenate([image, mask[..., :1]], axis=-1)
                 
                 if self.H is None or self.W is None:
                     self.H = image.shape[0] // self.downscale

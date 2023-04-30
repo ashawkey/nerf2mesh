@@ -79,22 +79,42 @@ python main.py data/garden/ --workspace trial_360_garden   -O --data_format colm
 **Tips:**
 * To get best mesh quality, you may need to adjust `--scale` to let the most interested object fall inside the unit box `[-1, 1]^3`, which can be visualized by appending `--vis_pose`.
 * To better model background (especially for outdoor scenes), you may need to adjust `--bound` to let most sparse points fall into the full box `[-bound, bound]^3`, which can also be visualized by appending `--vis_pose`.
-* For forward-facing dataset, remove `--enable_cam_center` so the scene center is determined by sparse points which is more suitable.
+* For single object centered captures focusing on mesh assets quality:
+  * remove the background by `scripts/remove_bg.py` and only reconstruct the targeted object.
+  * use `--decimate_target 5e5` to adjust targeted number of mesh faces.
+  * use `--lambda_normal 1e-3` for more smooth surface.
+  * use `--refine_decimate_ratio 0` to disable decimation during refinement.
+  * use `--diffuse_only` if you only want to get the diffuse texture.
+* For forward-facing captures:
+  * remove `--enable_cam_center` so the scene center is determined by sparse points instead of camera positions.
 
 ```bash
 # prepare your video or images under /data/custom, and run colmap (assumed installed):
 python scripts/colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap # if use video
 python scripts/colmap2nerf.py --images ./data/custom/images/ --run_colmap # if use images
 
-# recommended options for outdoor 360-inwarding captures
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+# generate downscaled images if resolution is very high and OOM (asve to`data/<name>/images_{downscale}`) 
+python scripts/downscale.py data/<name> --downscale 4
+# NOTE: remember to append `--downscale 4` as well when running main.py
 
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --scale 0.3 --stage 1 --iters 10000 --lambda_normal 1e-3
+# perform background removal for single object 360 captures (save to 'data/<name>/mask')
+python scripts/remove_bg.py data/<name>/images
+# NOTE: the mask quality depends on background complexity, do check the mask!
+
+# recommended options for single object 360 captures
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 0 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50 --decimate_target 1e5 --lambda_entropy 1e-3 --diffuse_only
+
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 1 --iters 10000 --lambda_normal 1e-3 --diffuse_only
+
+# recommended options for outdoor 360-inwarding captures
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 1 --iters 10000 --lambda_normal 1e-3
 
 # recommended options for forward-facing captures
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 4 --scale 0.3 --stage 0 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 2 --scale 0.1 --stage 0 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
 
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 4 --scale 0.3 --stage 1 --iters 10000 --lambda_normal 1e-3
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 2 --scale 0.1 --stage 1 --iters 10000 --lambda_normal 1e-3
 ```
 
 ### Advanced Usage
@@ -137,6 +157,9 @@ python main.py data/custom/ --workspace trial_custom -O --data_format colmap --b
 # set all smoothness regularizations to 0, usually get the best rendering quality
 --wo_smooth
 
+# only use diffuse shading
+--diffuse_only
+
 ### coarse mesh extraction & post-processing
 --mcubes_reso 512 # marching cubes resolution
 --decimate_target 300000 # decimate raw mesh to this face number
@@ -152,9 +175,6 @@ python main.py data/custom/ --workspace trial_custom -O --data_format colmap --b
 --refine_remesh_size 0.02 # remesh edge len after decimation
 
 ### Depth supervision (colmap dataset only)
-
-# generate downscaled images ('images` --> `images_4`)
-python scripts/downscale.py data/<name> --downscale 4
 
 # download depth checkpoints (omnidata v2)
 cd depth_tools

@@ -34,7 +34,7 @@ def decimate_mesh(verts, faces, target, backend='pymeshlab', remesh=False, optim
         import pyfqmr
         solver = pyfqmr.Simplify()
         solver.setMesh(verts, faces)
-        solver.simplify_mesh(target_count=target, preserve_border=False, verbose=False)
+        solver.simplify_mesh(target_count=int(target), preserve_border=False, verbose=False)
         verts, faces, normals = solver.getMesh()
     else:
 
@@ -47,7 +47,7 @@ def decimate_mesh(verts, faces, target, backend='pymeshlab', remesh=False, optim
         ms.meshing_decimation_quadric_edge_collapse(targetfacenum=int(target), optimalplacement=optimalplacement)
 
         if remesh:
-            # ms.apply_coord_taubin_smoothing()
+            ms.apply_coord_taubin_smoothing()
             ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.Percentage(1))
 
         # extract mesh

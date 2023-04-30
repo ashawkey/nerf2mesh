@@ -491,7 +491,7 @@ class NeRFRenderer(nn.Module):
         
         ### decimation
         if decimate_target > 0 and triangles.shape[0] > decimate_target:
-            vertices, triangles = decimate_mesh(vertices, triangles, decimate_target)
+            vertices, triangles = decimate_mesh(vertices, triangles, decimate_target, remesh=False)
 
         mesh = trimesh.Trimesh(vertices, triangles, process=False)
         mesh.export(os.path.join(save_path, f'mesh_0.ply'))
@@ -727,6 +727,10 @@ class NeRFRenderer(nn.Module):
         mask, _ = dr.interpolate(torch.ones_like(vertices[:, :1]).unsqueeze(0), rast, self.triangles) # [1, H, W, 1]
         mask_flatten = (mask > 0).view(-1)
         xyzs = xyzs.view(-1, 3)
+
+        # random noise to make appearance more robust
+        if self.training:
+            xyzs = xyzs + torch.randn_like(xyzs) * 1e-3
 
         rgbs = torch.zeros(h * w, 3, device=device, dtype=torch.float32)
 

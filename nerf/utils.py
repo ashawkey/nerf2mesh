@@ -657,7 +657,7 @@ class Trainer(object):
         else:
             gt_rgb = images
         
-        if self.opt.stage == 0 and self.global_step < self.opt.diffuse_step:
+        if (self.opt.stage == 0 and self.global_step < self.opt.diffuse_step) or self.opt.diffuse_only:
             shading = 'diffuse'
         else:
             shading = 'full'
@@ -821,11 +821,16 @@ class Trainer(object):
         else:
             gt_rgb = images
         
+        if self.opt.diffuse_only:
+            shading = 'diffuse'
+        else:
+            shading = 'full'
+        
         if self.opt.stage > 0:
             mvp = data['mvp'].squeeze(0) # [4, 4]
-            outputs = self.model.render_stage1(rays_o, rays_d, mvp, H, W, index=index, bg_color=bg_color, **vars(self.opt))
+            outputs = self.model.render_stage1(rays_o, rays_d, mvp, H, W, index=index, bg_color=bg_color, shading=shading, **vars(self.opt))
         else:    
-            outputs = self.model.render(rays_o, rays_d, index=index, staged=True, bg_color=bg_color, perturb=False, cam_near_far=cam_near_far, **vars(self.opt))
+            outputs = self.model.render(rays_o, rays_d, index=index, staged=True, bg_color=bg_color, perturb=False, cam_near_far=cam_near_far, shading=shading, **vars(self.opt))
 
         pred_rgb = outputs['image'].reshape(H, W, 3)
         pred_depth = outputs['depth'].reshape(H, W)
@@ -846,6 +851,9 @@ class Trainer(object):
 
         if bg_color is not None:
             bg_color = bg_color.to(self.device)
+        
+        if self.opt.diffuse_only:
+            shading = 'diffuse'
 
         if self.opt.stage > 0:
             mvp = data['mvp'].squeeze(0) # [4, 4]
