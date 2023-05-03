@@ -16,13 +16,18 @@ from dpt import DPTDepthModel
 IMAGE_SIZE = 384
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--in_dir', type=str)
+parser.add_argument('path', type=str)
 parser.add_argument('--out_dir', type=str)
 parser.add_argument('--ckpt', type=str, default='./depth_tools/omnidata_dpt_depth_v2.ckpt')
 
 opt = parser.parse_args()
 
-os.makedirs(opt.out_dir, exist_ok=True)
+if opt.path[-1] == '/':
+    opt.path = opt.path[:-1]
+
+out_dir = os.path.join(os.path.dirname(opt.path), f'depths')
+
+os.makedirs(out_dir, exist_ok=True)
 
 map_location = (lambda storage, loc: storage.cuda()) if torch.cuda.is_available() else torch.device('cpu')
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -62,7 +67,7 @@ def run_image(img_path):
     depth = F.interpolate(depth.unsqueeze(1), size=(H, W), mode='bicubic', align_corners=False)
     depth = depth.squeeze().cpu().numpy()
 
-    out_path = os.path.join(opt.out_dir, os.path.splitext(os.path.basename(img_path))[0]) + '.npy'
+    out_path = os.path.join(out_dir, os.path.splitext(os.path.basename(img_path))[0]) + '.npy'
 
     # plt.matshow(depth)
     # plt.show()
@@ -74,6 +79,6 @@ def run_image(img_path):
     np.save(out_path, depth)
 
 
-img_paths = glob.glob(os.path.join(opt.in_dir, '*'))
+img_paths = glob.glob(os.path.join(opt.path, '*'))
 for img_path in tqdm.tqdm(img_paths):
     run_image(img_path)

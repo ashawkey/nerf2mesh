@@ -108,8 +108,10 @@ python scripts/remove_bg.py data/<name>/images
 
 # recommended options for single object 360 captures
 python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 0 --clean_min_f 16 --clean_min_d 10 --visibility_mask_dilation 50 --iters 10000 --decimate_target 1e5 --sdf
+# NOTE: for finer faces, try --decimate_target 3e5
 
 python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 1 --iters 5000 --lambda_normal 1e-2 --refine_remesh_size 0.01 --sdf
+# NOTE: for finer faces, try --lambda_normal 1e-1 --refine_remesh_size 0.005
 
 # recommended options for outdoor 360-inwarding captures
 python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
@@ -186,8 +188,8 @@ cd depth_tools
 bash download_models.sh
 cd ..
 
-# generate dense depth
-python depth_tools/extract_depth.py --in_dir data/<name>/images_4 --out_dir data/<name>/depths
+# generate dense depth (save to `data/<name>/depths`)
+python depth_tools/extract_depth.py data/<name>/images_4
 
 # enable dense depth training
 python main.py data/<name> -O --bound 16 --data_format colmap --enable_dense_depth

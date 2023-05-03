@@ -349,7 +349,7 @@ class NeRFRenderer(nn.Module):
             ### NN search as a queer antialiasing ...
             mask = mask.cpu().numpy()
 
-            inpaint_region = binary_dilation(mask, iterations=10) # pad width
+            inpaint_region = binary_dilation(mask, iterations=32) # pad width
             inpaint_region[mask] = 0
 
             search_region = mask.copy()
