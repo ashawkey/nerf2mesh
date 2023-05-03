@@ -6,7 +6,7 @@ import argparse
 from PIL import Image
 
 parser = argparse.ArgumentParser()
-parser.add_argument('path', type=str)
+parser.add_argument('path', type=str, help="path to the folder that contains `images/`")
 parser.add_argument('--downscale', type=int, default=4)
 
 opt = parser.parse_args()

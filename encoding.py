@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+
 
 class FreqEncoder_torch(nn.Module):
     def __init__(self, input_dim, max_freq_log2, N_freqs,
@@ -43,6 +45,27 @@ class FreqEncoder_torch(nn.Module):
 
         return out
 
+class TCNN_hashgrid(nn.Module):
+    def __init__(self, num_levels, level_dim, log2_hashmap_size, base_resolution, desired_resolution, interpolation, **kwargs):
+        super().__init__()
+        import tinycudann as tcnn
+        self.encoder = tcnn.Encoding(
+            n_input_dims=3,
+            encoding_config={
+                "otype": "HashGrid",
+                "n_levels": num_levels,
+                "n_features_per_level": level_dim,
+                "log2_hashmap_size": log2_hashmap_size,
+                "base_resolution": base_resolution,
+                "per_level_scale": np.exp2(np.log2(desired_resolution / num_levels) / (num_levels - 1)),
+                "interpolation": "Smoothstep" if interpolation == 'smoothstep' else "Linear",
+            },
+        )
+        self.output_dim = self.encoder.n_output_dims # patch
+    
+    def forward(self, x, bound=1, **kwargs):
+        return self.encoder((x + bound) / (2 * bound))
+
 
 def get_encoder(encoding, input_dim=3, 
                 output_dim=1, resolution=300, mode='bilinear', # dense grid
@@ -69,6 +92,9 @@ def get_encoder(encoding, input_dim=3,
     elif encoding == 'hashgrid':
         from gridencoder import GridEncoder
         encoder = GridEncoder(input_dim=input_dim, num_levels=num_levels, level_dim=level_dim, base_resolution=base_resolution, log2_hashmap_size=log2_hashmap_size, desired_resolution=desired_resolution, gridtype='hash', align_corners=align_corners, interpolation=interpolation)
+    
+    elif encoding == 'hashgrid_tcnn':
+        encoder = TCNN_hashgrid(num_levels=num_levels, level_dim=level_dim, log2_hashmap_size=log2_hashmap_size, base_resolution=base_resolution, desired_resolution=desired_resolution, interpolation=interpolation)
     
     elif encoding == 'tiledgrid':
         from gridencoder import GridEncoder

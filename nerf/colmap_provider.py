@@ -437,7 +437,7 @@ class ColmapDataset:
             # read images
             self.images = []
 
-            for i, f in tqdm.tqdm(enumerate(img_paths), desc=f'Loading {self.type} data'):
+            for i, f in enumerate(tqdm.tqdm(img_paths, desc=f'Loading {self.type} data')):
 
                 image = cv2.imread(f, cv2.IMREAD_UNCHANGED) # [H, W, 3] o [H, W, 4]
 

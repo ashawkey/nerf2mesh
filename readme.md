@@ -5,9 +5,11 @@ This repository contains a PyTorch re-implementation of the paper: [Delicate Tex
 
 ### [Project Page](https://ashawkey.github.io/nerf2mesh/) | [Arxiv](https://arxiv.org/abs/2303.02091) | [Paper](https://huggingface.co/ashawkey/nerf2mesh/resolve/main/paper.pdf) | [Models](https://huggingface.co/ashawkey/nerf2mesh/tree/main/scenes) 
 
-![](assets/teaser.jpg)
+**News (2023.5.3)**: support [background removal](https://github.com/OPHoperHPO/image-background-remove-tool) and [SDF](https://github.com/Totoro97/NeuS) mode for stage 0, which produces more robust and smooth mesh for single-object reconstruction:
 
-![vis](https://user-images.githubusercontent.com/25863658/223434084-a487cb0f-2408-41c6-bd39-93d017641eec.jpg)
+![](assets/teaser2.jpg)
+
+![](assets/teaser.jpg)
 
 # Install
 
@@ -19,6 +21,9 @@ cd nerf2mesh
 ### Install with pip
 ```bash
 pip install -r requirements.txt
+
+# tiny-cuda-nn
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 
 # nvdiffrast
 pip install git+https://github.com/NVlabs/nvdiffrast/
@@ -81,10 +86,10 @@ python main.py data/garden/ --workspace trial_360_garden   -O --data_format colm
 * To better model background (especially for outdoor scenes), you may need to adjust `--bound` to let most sparse points fall into the full box `[-bound, bound]^3`, which can also be visualized by appending `--vis_pose`.
 * For single object centered captures focusing on mesh assets quality:
   * remove the background by `scripts/remove_bg.py` and only reconstruct the targeted object.
-  * use `--decimate_target 5e5` to adjust targeted number of mesh faces.
-  * use `--lambda_normal 1e-3` for more smooth surface.
-  * use `--refine_decimate_ratio 0` to disable decimation during refinement.
+  * use `--sdf` to enable sdf based stage 0 model.
   * use `--diffuse_only` if you only want to get the diffuse texture.
+  * adjust `--decimate_target 1e5` to control stage 0 number of mesh faces, and adjust `--refine_remesh_size 0.01` to control stage 1 number of mesh faces (average edge length).
+  * adjust `--lambda_normal 1e-2` for more smooth surface.
 * For forward-facing captures:
   * remove `--enable_cam_center` so the scene center is determined by sparse points instead of camera positions.
 
@@ -102,9 +107,9 @@ python scripts/remove_bg.py data/<name>/images
 # NOTE: the mask quality depends on background complexity, do check the mask!
 
 # recommended options for single object 360 captures
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 0 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50 --decimate_target 1e5 --lambda_entropy 1e-3 --diffuse_only
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 0 --clean_min_f 16 --clean_min_d 10 --visibility_mask_dilation 50 --iters 10000 --decimate_target 1e5 --sdf
 
-python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 1 --iters 10000 --lambda_normal 1e-3 --diffuse_only
+python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 1 --dt_gamma 0 --stage 1 --iters 5000 --lambda_normal 1e-2 --refine_remesh_size 0.01 --sdf
 
 # recommended options for outdoor 360-inwarding captures
 python main.py data/custom/ --workspace trial_custom -O --data_format colmap --bound 16 --enable_cam_center --enable_cam_near_far --stage 0 --lambda_entropy 1e-3 --clean_min_f 16 --clean_min_d 10 --lambda_tv 2e-8 --visibility_mask_dilation 50
@@ -133,7 +138,7 @@ python main.py data/custom/ --workspace trial_custom -O --data_format colmap --b
 --test_no_mesh # do not save mesh
 
 ### dataset related
---data_format [colmap|nerf] # dataset format
+--data_format [colmap|nerf|dtu] # dataset format
 --enable_cam_center # use camera center instead of sparse point center as scene center (colmap dataset only)
 --enable_cam_near_far # estimate camera near & far from sparse points (colmap dataset only)
 

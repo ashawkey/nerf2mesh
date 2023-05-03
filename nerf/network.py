@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,18 +7,39 @@ from encoding import get_encoder
 from activation import trunc_exp
 from .renderer import NeRFRenderer
 
-
 class MLP(nn.Module):
-    def __init__(self, dim_in, dim_out, dim_hidden, num_layers, bias=True):
+    def __init__(self, dim_in, dim_out, dim_hidden, num_layers, bias=True, geom_init=False, weight_norm=False):
         super().__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
         self.dim_hidden = dim_hidden
         self.num_layers = num_layers
+        self.geom_init = geom_init
 
         net = []
         for l in range(num_layers):
-            net.append(nn.Linear(self.dim_in if l == 0 else self.dim_hidden, self.dim_out if l == num_layers - 1 else self.dim_hidden, bias=bias))
+
+            in_dim = self.dim_in if l == 0 else self.dim_hidden
+            out_dim = self.dim_out if l == num_layers - 1 else self.dim_hidden
+
+            net.append(nn.Linear(in_dim, out_dim, bias=bias))
+        
+            if geom_init:
+                if l == num_layers - 1:
+                    torch.nn.init.normal_(net[l].weight, mean=math.sqrt(math.pi) / math.sqrt(in_dim), std=1e-4)
+                    if bias: torch.nn.init.constant_(net[l].bias, -0.5) # sphere init (very important for hashgrid encoding!)
+
+                elif l == 0:
+                    torch.nn.init.normal_(net[l].weight[:, :3], 0.0, math.sqrt(2) / math.sqrt(out_dim))
+                    torch.nn.init.constant_(net[l].weight[:, 3:], 0.0)
+                    if bias: torch.nn.init.constant_(net[l].bias, 0.0)
+
+                else:
+                    torch.nn.init.normal_(net[l].weight, 0.0, math.sqrt(2) / math.sqrt(out_dim))
+                    if bias: torch.nn.init.constant_(net[l].bias, 0.0)
+            
+            if weight_norm:
+                net[l] = nn.utils.weight_norm(net[l])
 
         self.net = nn.ModuleList(net)
     
@@ -25,7 +47,10 @@ class MLP(nn.Module):
         for l in range(self.num_layers):
             x = self.net[l](x)
             if l != self.num_layers - 1:
-                x = F.relu(x, inplace=True)
+                if self.geom_init:
+                    x = F.softplus(x, beta=100)
+                else:
+                    x = F.relu(x, inplace=True)
         return x
 
 
@@ -38,14 +63,19 @@ class NeRFNetwork(NeRFRenderer):
         super().__init__(opt)
 
         # sigma and feature network
-        self.encoder, self.in_dim_density = get_encoder("hashgrid", level_dim=1, desired_resolution=2048 * self.bound, interpolation='smoothstep')
-        self.encoder_color, self.in_dim_color = get_encoder("hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
-        self.sigma_net = MLP(self.in_dim_density, 1, 32, 2, bias=False)
+        self.encoder, self.in_dim_density = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=1, desired_resolution=2048 * self.bound, interpolation='linear')
+        self.sigma_net = MLP(3 + self.in_dim_density, 1, 64, 2, bias=self.opt.sdf, geom_init=self.opt.sdf, weight_norm=self.opt.sdf)
 
         # color network
+        self.encoder_color, self.in_dim_color = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
+        self.color_net = MLP(3 + self.in_dim_color + self.individual_dim, 3 + specular_dim, 64, 3, bias=False)
+
         self.encoder_dir, self.in_dim_dir = get_encoder("None")
-        self.color_net = MLP(self.in_dim_color + self.individual_dim, 3 + specular_dim, 64, 3, bias=False)
         self.specular_net = MLP(specular_dim + self.in_dim_dir, 3, 32, 2, bias=False)
+
+        # sdf
+        if self.opt.sdf:
+            self.register_parameter('variance', nn.Parameter(torch.tensor(0.3, dtype=torch.float32)))
 
 
     def forward(self, x, d, c=None, shading='full'):
@@ -63,18 +93,49 @@ class NeRFNetwork(NeRFRenderer):
 
         # sigma
         h = self.encoder(x, bound=self.bound)
+        h = torch.cat([x, h], dim=-1)
         h = self.sigma_net(h)
 
-        sigma = trunc_exp(h[..., 0])
+        results = {}
 
-        return {
-            'sigma': sigma,
-        }
+        if self.opt.sdf:
+            sigma = h[..., 0].float() # sdf
+        else:
+            sigma = trunc_exp(h[..., 0])
+
+        results['sigma'] = sigma
+
+        return results
+    
+    # finite difference
+    def normal(self, x, epsilon=1e-4):
+
+        if self.opt.tcnn:
+            with torch.enable_grad():
+                x.requires_grad_(True)
+                sigma = self.density(x)['sigma']
+                normal = torch.autograd.grad(torch.sum(sigma), x, create_graph=True)[0] # [N, 3]
+        else:
+            dx_pos = self.density((x + torch.tensor([[epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dx_neg = self.density((x + torch.tensor([[-epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dy_pos = self.density((x + torch.tensor([[0.00, epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dy_neg = self.density((x + torch.tensor([[0.00, -epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dz_pos = self.density((x + torch.tensor([[0.00, 0.00, epsilon]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dz_neg = self.density((x + torch.tensor([[0.00, 0.00, -epsilon]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            
+            normal = torch.stack([
+                0.5 * (dx_pos - dx_neg) / epsilon, 
+                0.5 * (dy_pos - dy_neg) / epsilon, 
+                0.5 * (dz_pos - dz_neg) / epsilon
+            ], dim=-1)
+
+        return normal
     
 
     def geo_feat(self, x, c=None):
 
         h = self.encoder_color(x, bound=self.bound)
+        h = torch.cat([x, h], dim=-1)
         if c is not None:
             h = torch.cat([h, c.repeat(x.shape[0], 1) if c.shape[0] == 1 else c], dim=-1)
         h = self.color_net(h)
@@ -89,11 +150,11 @@ class NeRFNetwork(NeRFRenderer):
         geo_feat = self.geo_feat(x, c)
         diffuse = geo_feat[..., :3]
 
-        d = self.encoder_dir(d)
         if shading == 'diffuse':
             color = diffuse
             specular = None
         else: 
+            d = self.encoder_dir(d)
             specular = self.specular_net(torch.cat([d, geo_feat[..., 3:]], dim=-1))
             specular = torch.sigmoid(specular)
             if shading == 'specular':
@@ -116,5 +177,8 @@ class NeRFNetwork(NeRFRenderer):
             {'params': self.color_net.parameters(), 'lr': lr}, 
             {'params': self.specular_net.parameters(), 'lr': lr}, 
         ])
+
+        if self.opt.sdf:
+            params.append({'params': self.variance, 'lr': lr * 0.1})
 
         return params

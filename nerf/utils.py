@@ -38,6 +38,8 @@ def custom_meshgrid(*args):
     else:
         return torch.meshgrid(*args, indexing='ij')
 
+def safe_normalize(x, eps=1e-20):
+    return x / torch.sqrt(torch.clamp(torch.sum(x * x, -1, keepdim=True), min=eps))
 
 @torch.jit.script
 def linear_to_srgb(x):
@@ -647,14 +649,20 @@ class Trainer(object):
         #     # bg_color = torch.rand(3, device=self.device) # [3], frame-wise random.
         #     bg_color = torch.rand(N, 3, device=self.device) # [N, 3], pixel-wise random.
 
+        if self.opt.sdf:
+            self.opt.cos_anneal_ratio = min(1, self.global_step / (0.5 * self.opt.iters))
+            self.opt.normal_anneal_epsilon = 1e-3 * (1 - min(0.9, self.global_step / (0.5 * self.opt.iters)))
+
         if self.opt.background == 'white':
             bg_color = 1
         else: # random
             bg_color = torch.rand(N, 3, device=self.device) # [N, 3], pixel-wise random.
 
         if C == 4:
-            gt_rgb = images[..., :3] * images[..., 3:] + bg_color * (1 - images[..., 3:])
+            gt_mask = images[..., 3:]
+            gt_rgb = images[..., :3] * gt_mask + bg_color * (1 - gt_mask)
         else:
+            gt_mask = None
             gt_rgb = images
         
         if (self.opt.stage == 0 and self.global_step < self.opt.diffuse_step) or self.opt.diffuse_only:
@@ -667,7 +675,11 @@ class Trainer(object):
             outputs = self.model.render(rays_o, rays_d, index=index, staged=False, bg_color=bg_color, perturb=True, cam_near_far=cam_near_far, shading=shading, **vars(self.opt))
 
             pred_rgb = outputs['image']
-            loss = self.criterion(pred_rgb, gt_rgb).mean(-1) # [N, 3] --> [N]
+            loss = self.opt.lambda_rgb *self.criterion(pred_rgb, gt_rgb).mean(-1) # [N, 3] --> [N]
+
+            if gt_mask is not None and self.opt.lambda_mask > 0:
+                pred_mask = outputs['weights_sum']
+                loss = loss + self.opt.lambda_mask * self.criterion(pred_mask, gt_mask.squeeze(1))
 
             if 'depth' in data:
                 gt_depth = data['depth'].view(-1, 1)
@@ -698,7 +710,11 @@ class Trainer(object):
             outputs = self.model.render_stage1(rays_o, rays_d, mvp, H, W, bg_color=bg_color, shading=shading, **vars(self.opt))
 
             pred_rgb = outputs['image']
-            loss = self.criterion(pred_rgb, gt_rgb).mean(-1) # [H, W]
+            loss = self.opt.lambda_rgb * self.criterion(pred_rgb, gt_rgb).mean(-1) # [H, W]
+
+            if gt_mask is not None and self.opt.lambda_mask > 0:
+                pred_mask = outputs['weights_sum']
+                loss = loss + self.opt.lambda_mask * self.criterion(pred_mask.view(-1), gt_mask.view(-1))
 
             if self.opt.refine:
                 self.model.update_triangles_errors(loss.detach())
@@ -719,6 +735,11 @@ class Trainer(object):
                 specs = outputs['speculars'] # [N, 3] in [0, 1]
                 if specs is not None:
                     loss = loss + self.opt.lambda_specular * (specs ** 2).sum(-1).mean()
+                
+            if self.opt.sdf and self.opt.lambda_eikonal > 0:
+                normal = outputs['normal']
+                loss_eikonal = ((torch.linalg.norm(normal, ord=2, dim=-1) - 1) ** 2).mean()
+                loss = loss + self.opt.lambda_eikonal * loss_eikonal
  
         if self.opt.stage == 1:
             # perceptual loss
@@ -821,7 +842,7 @@ class Trainer(object):
         else:
             gt_rgb = images
         
-        if self.opt.diffuse_only:
+        if (self.opt.stage == 0 and self.global_step < self.opt.diffuse_step) or self.opt.diffuse_only:
             shading = 'diffuse'
         else:
             shading = 'full'
@@ -1091,7 +1112,6 @@ class Trainer(object):
 
         # interpolation to the original resolution
         if downscale != 1:
-            # TODO: have to permute twice with torch...
             preds = F.interpolate(preds.unsqueeze(0).permute(0, 3, 1, 2), size=(H, W), mode='nearest').permute(0, 2, 3, 1).squeeze(0).contiguous()
             preds_depth = F.interpolate(preds_depth.unsqueeze(0).unsqueeze(1), size=(H, W), mode='nearest').squeeze(0).squeeze(1)
 
@@ -1169,11 +1189,14 @@ class Trainer(object):
                 if self.use_tensorboardX:
                     self.writer.add_scalar("train/loss", loss_val, self.global_step)
                     self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
-
+                
+                desc = f"loss={loss_val:.6f} ({total_loss/self.local_step:.6f})"
+                if self.opt.sdf:
+                    desc += f" var={torch.exp(self.model.variance * 10.0).item():.4f}"
                 if self.scheduler_update_every_step:
-                    pbar.set_description(f"loss={loss_val:.6f} ({total_loss/self.local_step:.6f}), lr={self.optimizer.param_groups[0]['lr']:.6f}")
-                else:
-                    pbar.set_description(f"loss={loss_val:.6f} ({total_loss/self.local_step:.6f})")
+                    desc += f" lr={self.optimizer.param_groups[0]['lr']:.6f}"
+                pbar.set_description(desc)
+
                 pbar.update(loader.batch_size)
             
             # if stage1, periodically cleaning mesh and re-init model
@@ -1207,7 +1230,7 @@ class Trainer(object):
             else:
                 self.lr_scheduler.step()
 
-        self.log(f"==> Finished Epoch {self.epoch}.")
+        self.log(f"==> Finished Epoch {self.epoch}, loss = {average_loss:.6f}.")
 
 
     def evaluate_one_epoch(self, loader, name=None):
@@ -1316,7 +1339,7 @@ class Trainer(object):
         if self.ema is not None:
             self.ema.restore()
 
-        self.log(f"++> Evaluate epoch {self.epoch} Finished.")
+        self.log(f"++> Evaluate epoch {self.epoch} Finished, loss = {average_loss:.6f}")
 
     def save_checkpoint(self, name=None, full=False, best=False, remove_old=True):
 
@@ -1417,10 +1440,6 @@ class Trainer(object):
             if 'mean_density' in checkpoint_dict:
                 self.model.mean_density = checkpoint_dict['mean_density']
         
-        # only load model if stage is different...
-        # if checkpoint_dict['stage'] != self.opt.stage:
-        #     return
-
         if model_only:
             return
 

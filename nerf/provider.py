@@ -163,27 +163,9 @@ class NeRFDataset:
             frames = np.array([f for f in frames if f['time'] == 0])
             print(f'[INFO] selecting time == 0 frames: {len(transform["frames"])} --> {len(frames)}')
 
-        # load nerfstudio traj json
-        if self.opt.camera_traj != '' and type == 'test':
 
-            poses = []
-            with open(self.opt.camera_traj, 'r') as f:
-                traj = json.load(f)
-            self.H = traj['render_height']
-            self.W = traj['render_width']
-            frames = traj['camera_path']
-            for f in frames:
-                pose = np.array(f['camera_to_world'], dtype=np.float32).reshape(4, 4)
-                poses.append(pose)
-
-            self.poses = np.stack(poses, axis=0)
-            self.poses = self.poses[:, [1, 0, 2, 3], :]
-            self.images = None
-            
-            # TODO: change scale and center? how's its convention?
-        
         # for colmap, manually interpolate a test set.
-        elif self.mode == 'colmap' and type == 'test':
+        if self.mode == 'colmap' and type == 'test':
             
             # choose two random poses, and interpolate between.
             f0, f1 = np.random.choice(frames, 2, replace=False)

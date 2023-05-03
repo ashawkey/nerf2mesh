@@ -17,6 +17,8 @@ if __name__ == '__main__':
     parser.add_argument('--stage', type=int, default=0, help="training stage")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--fp16', action='store_true', help="use amp mixed precision training")
+    parser.add_argument('--sdf', action='store_true', help="use sdf instead of density for nerf")
+    parser.add_argument('--tcnn', action='store_true', help="use tcnn's gridencoder")
 
     ### testing options
     parser.add_argument('--test', action='store_true', help="test mode")
@@ -69,6 +71,9 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_tv', type=float, default=1e-8, help="loss scale")
     parser.add_argument('--lambda_depth', type=float, default=0.1, help="loss scale")
     parser.add_argument('--lambda_specular', type=float, default=1e-5, help="loss scale")
+    parser.add_argument('--lambda_eikonal', type=float, default=0.1, help="loss scale")
+    parser.add_argument('--lambda_rgb', type=float, default=1, help="loss scale")
+    parser.add_argument('--lambda_mask', type=float, default=0.1, help="loss scale")
 
     # stage 1 regularizations
     parser.add_argument('--wo_smooth', action='store_true', help="disable all smoothness regularizations")
@@ -130,6 +135,16 @@ if __name__ == '__main__':
     if opt.contract:
         # mark untrained is not very correct in contraction mode...
         opt.mark_untrained = False
+    
+    if opt.sdf:
+        opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
+        opt.enable_offset_nerf_grad = True # lead to more sharp texture
+        opt.lambda_tv = 0 # tcnn does not support inplace TV
+        opt.density_thresh = 0.001 # use smaller thresh to suit density scale from sdf
+        
+        opt.refine_decimate_ratio = 0 # disable decimation
+        opt.refine_size = 0 # disable subdivision
+        
     
     # best rendering quality at the sacrifice of mesh quality
     if opt.wo_smooth:
@@ -211,6 +226,7 @@ if __name__ == '__main__':
 
         # scheduler = lambda optimizer: optim.lr_scheduler.MultiStepLR(optimizer, milestones=[opt.iters // 2, opt.iters * 3 // 4, opt.iters * 9 // 10], gamma=0.33)
         scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
+        # scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.01 + 0.99 * (iter / 500) if iter <= 500 else 0.1 ** ((iter - 500) / (opt.iters - 500)))
 
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95 if opt.stage == 0 else None, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, use_checkpoint=opt.ckpt, eval_interval=eval_interval, save_interval=save_interval)
 

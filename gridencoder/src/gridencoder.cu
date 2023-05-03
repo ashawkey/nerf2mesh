@@ -320,7 +320,7 @@ __global__ void kernel_grid_backward(
         uint32_t index = get_grid_index<D, C>(gridtype, align_corners, ch, hashmap_size, resolution, pos_grid_local);
 
         // atomicAdd for __half is slow (especially for large values), so we use __half2 if N_C % 2 == 0
-        // TODO: use float which is better than __half, if N_C % 2 != 0
+        // ENHANCE: use float which is better than __half, if N_C % 2 != 0
         if (std::is_same<scalar_t, at::Half>::value && N_C % 2 == 0) {
             #pragma unroll
             for (uint32_t c = 0; c < N_C; c += 2) {

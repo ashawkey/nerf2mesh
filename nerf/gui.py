@@ -137,7 +137,6 @@ class NeRFGUI:
 
     
     def test_step(self):
-        # TODO: seems we have to move data from GPU --> CPU --> GPU?
 
         if self.need_update or self.spp < self.opt.max_spp:
         
@@ -428,14 +427,6 @@ class NeRFGUI:
 
         
         dpg.create_viewport(title='torch-ngp', width=self.W, height=self.H, resizable=False)
-        
-        # TODO: seems dearpygui doesn't support resizing texture...
-        # def callback_resize(sender, app_data):
-        #     self.W = app_data[0]
-        #     self.H = app_data[1]
-        #     # how to reload texture ???
-
-        # dpg.set_viewport_resize_callback(callback_resize)
 
         ### global theme
         with dpg.theme() as theme_no_padding:

@@ -78,7 +78,7 @@ class NeRFDataset:
         self.fp16 = opt.fp16 # if preload, load into fp16.
 
         if self.scale == -1:
-            print(f'[WARN] --data_format nerf cannot auto-choose --scale, use 1 as default.')
+            print(f'[WARN] --data_format dtu cannot auto-choose --scale, use 1 as default.')
             self.scale = 1
             
         self.training = self.type in ['train', 'all', 'trainval']

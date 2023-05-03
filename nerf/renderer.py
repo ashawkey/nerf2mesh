@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from scipy.ndimage import binary_dilation, binary_erosion
 
-from .utils import custom_meshgrid, plot_pointcloud
+from .utils import custom_meshgrid, plot_pointcloud, safe_normalize
 from meshutils import *
 
 # import torch_scatter
@@ -195,23 +195,31 @@ class NeRFRenderer(nn.Module):
         f = self.triangles.detach().cpu().numpy()
 
         errors = self.triangles_errors.cpu().numpy()
-        cnt = self.triangles_errors_cnt.cpu().numpy()
-        cnt_mask = cnt > 0
-        errors[cnt_mask] = errors[cnt_mask] / cnt[cnt_mask]
 
-        # only care about the inner mesh
-        errors = errors[:self.f_cumsum[1]]
-        cnt_mask = cnt_mask[:self.f_cumsum[1]]
+        if self.opt.sdf:
 
-        # find a threshold to decide whether we perform subdivision / decimation.
-        thresh_refine = np.percentile(errors[cnt_mask], 90)
-        thresh_decimate = np.percentile(errors[cnt_mask], 50)
+            # sdf mode: just set all faces to decimation & remesh.
+            mask = np.ones_like(errors)
 
-        mask = np.zeros_like(errors)
-        mask[(errors > thresh_refine) & cnt_mask] = 2
-        mask[(errors < thresh_decimate) & cnt_mask] = 1
+        else:
+            mask = np.zeros_like(errors)
 
-        print(f'[INFO] faces to decimate {(mask == 1).sum()}, faces to refine {(mask == 2).sum()}')
+            cnt = self.triangles_errors_cnt.cpu().numpy()
+            cnt_mask = cnt > 0
+            errors[cnt_mask] = errors[cnt_mask] / cnt[cnt_mask]
+
+            # only care about the inner mesh
+            errors = errors[:self.f_cumsum[1]]
+            cnt_mask = cnt_mask[:self.f_cumsum[1]]
+
+            # find a threshold to decide whether we perform subdivision / decimation.
+            thresh_refine = np.percentile(errors[cnt_mask], 90)
+            thresh_decimate = np.percentile(errors[cnt_mask], 50)
+
+            mask[(errors > thresh_refine) & cnt_mask] = 2
+            mask[(errors < thresh_decimate) & cnt_mask] = 1
+
+            print(f'[INFO] faces to decimate {(mask == 1).sum()}, faces to refine {(mask == 2).sum()}')
 
         if self.bound <= 1:
 
@@ -341,11 +349,11 @@ class NeRFRenderer(nn.Module):
             ### NN search as a queer antialiasing ...
             mask = mask.cpu().numpy()
 
-            inpaint_region = binary_dilation(mask, iterations=3)
+            inpaint_region = binary_dilation(mask, iterations=10) # pad width
             inpaint_region[mask] = 0
 
             search_region = mask.copy()
-            not_search_region = binary_erosion(search_region, iterations=2)
+            not_search_region = binary_erosion(search_region, iterations=3)
             search_region[not_search_region] = 0
 
             search_coords = np.stack(np.nonzero(search_region), axis=-1)
@@ -460,22 +468,30 @@ class NeRFRenderer(nn.Module):
                         xx, yy, zz = custom_meshgrid(xs, ys, zs)
                         pts = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [S, 3]
                         with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                            val = self.density(pts.to(device))['sigma'].reshape(len(xs), len(ys), len(zs)) # [S, 1] --> [x, y, z]
-                        sigmas[xi * S: xi * S + len(xs), yi * S: yi * S + len(ys), zi * S: zi * S + len(zs)] = val
+                            val = self.density(pts.to(device))['sigma'] # [S, 1]
+                        sigmas[xi * S: xi * S + len(xs), yi * S: yi * S + len(ys), zi * S: zi * S + len(zs)] = val.reshape(len(xs), len(ys), len(zs)) 
 
             # use the density_grid as a baseline mask (also excluding untrained regions)
-            mask = torch.zeros([self.grid_size] * 3, dtype=torch.float32, device=device)
-            all_indices = torch.arange(self.grid_size**3, device=device, dtype=torch.int)
-            all_coords = raymarching.morton3D_invert(all_indices).long()
-            mask[tuple(all_coords.T)] = self.density_grid[0]
-            mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=[resolution] * 3, mode='nearest').squeeze(0).squeeze(0)
-            mask = (mask > density_thresh)
-            sigmas = sigmas * mask
+            if not self.opt.sdf:
+                mask = torch.zeros([self.grid_size] * 3, dtype=torch.float32, device=device)
+                all_indices = torch.arange(self.grid_size**3, device=device, dtype=torch.int)
+                all_coords = raymarching.morton3D_invert(all_indices).long()
+                mask[tuple(all_coords.T)] = self.density_grid[0]
+                mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=[resolution] * 3, mode='nearest').squeeze(0).squeeze(0)
+                mask = (mask > density_thresh)
+                sigmas = sigmas * mask
 
         sigmas = torch.nan_to_num(sigmas, 0)
         sigmas = sigmas.cpu().numpy()
 
-        vertices, triangles = mcubes.marching_cubes(sigmas, density_thresh)
+        # import kiui
+        # for i in range(254,255):
+        #     kiui.vis.plot_matrix((sigmas[..., i]).astype(np.float32))
+
+        if self.opt.sdf:
+            vertices, triangles = mcubes.marching_cubes(-sigmas, 0)
+        else:
+            vertices, triangles = mcubes.marching_cubes(sigmas, density_thresh)
 
         vertices = vertices / (resolution - 1.0) * 2 - 1
         vertices = vertices.astype(np.float32)
@@ -612,11 +628,28 @@ class NeRFRenderer(nn.Module):
                 flatten_rays = raymarching.flatten_rays(rays, xyzs.shape[0]).long()
                 ind_code = ind_code[flatten_rays]
 
-            dirs = dirs / torch.norm(dirs, dim=-1, keepdim=True)
+            dirs = safe_normalize(dirs)
             with torch.cuda.amp.autocast(enabled=self.opt.fp16):
                 sigmas, rgbs, speculars = self(xyzs, dirs, ind_code, shading)
+            
+            if self.opt.sdf:
+                # sigmas are sdf
+                inv_s = torch.exp(self.variance * 10.0).clip(1e-6, 1e6)
+                raw_normal = self.normal(xyzs, self.opt.normal_anneal_epsilon)
+                results['normal'] = raw_normal
+                normal = safe_normalize(raw_normal)
+                true_cos = (dirs * normal).sum(-1)
+                iter_cos = - (F.relu(-true_cos * 0.5 + 0.5) * (1.0 - self.opt.cos_anneal_ratio) + \
+                              F.relu(-true_cos) * self.opt.cos_anneal_ratio)
+                estimated_prev_sdf = sigmas - iter_cos * ts[:, 1] * 0.5
+                estimated_next_sdf = sigmas + iter_cos * ts[:, 1] * 0.5
+                prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
+                next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+                p = prev_cdf - next_cdf
+                c = prev_cdf
+                sigmas = ((p + 1e-5) / (c + 1e-5)).view(-1).clip(0, 1) # sigmas are alpha now
 
-            weights, weights_sum, depth, image = raymarching.composite_rays_train(sigmas, rgbs, ts, rays, T_thresh)
+            weights, weights_sum, depth, image = raymarching.composite_rays_train(sigmas, rgbs, ts, rays, T_thresh, self.opt.sdf)
 
             results['num_points'] = xyzs.shape[0]
             results['xyzs'] = xyzs
@@ -653,11 +686,25 @@ class NeRFRenderer(nn.Module):
 
                 xyzs, dirs, ts = raymarching.march_rays(n_alive, n_step, rays_alive, rays_t, rays_o, rays_d, self.real_bound, self.opt.contract, self.density_bitfield, self.cascade, self.grid_size, nears, fars, perturb if step == 0 else False, dt_gamma, max_steps)
                 
-                dirs = dirs / torch.norm(dirs, dim=-1, keepdim=True)
+                dirs = safe_normalize(dirs)
                 with torch.cuda.amp.autocast(enabled=self.opt.fp16):
                     sigmas, rgbs, speculars = self(xyzs, dirs, ind_code, shading)
+                
+                if self.opt.sdf:
+                    # sigmas are sdf
+                    inv_s = torch.exp(self.variance * 10.0).clip(1e-6, 1e6)
+                    raw_normal = self.normal(xyzs)
+                    normal = safe_normalize(raw_normal)
+                    true_cos = - F.relu(-(dirs * normal).sum(-1))
+                    estimated_prev_sdf = sigmas - true_cos * ts[:, 1] * 0.5
+                    estimated_next_sdf = sigmas + true_cos * ts[:, 1] * 0.5
+                    prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
+                    next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+                    p = prev_cdf - next_cdf
+                    c = prev_cdf
+                    sigmas = ((p + 1e-5) / (c + 1e-5)).view(-1).clip(0, 1)
 
-                raymarching.composite_rays(n_alive, n_step, rays_alive, rays_t, sigmas, rgbs, ts, weights_sum, depth, image, T_thresh)
+                raymarching.composite_rays(n_alive, n_step, rays_alive, rays_t, sigmas, rgbs, ts, weights_sum, depth, image, T_thresh, self.opt.sdf)
 
                 rays_alive = rays_alive[rays_alive >= 0]
 
@@ -696,7 +743,7 @@ class NeRFRenderer(nn.Module):
             h, w = h0, w0
             dirs = rays_d.contiguous()
 
-        dirs = dirs / torch.norm(dirs, dim=-1, keepdim=True)
+        dirs = safe_normalize(dirs)
 
         # mix background color
         if bg_color is None:
@@ -725,7 +772,7 @@ class NeRFRenderer(nn.Module):
 
         xyzs, _ = dr.interpolate(vertices.unsqueeze(0), rast, self.triangles) # [1, H, W, 3]
         mask, _ = dr.interpolate(torch.ones_like(vertices[:, :1]).unsqueeze(0), rast, self.triangles) # [1, H, W, 1]
-        mask_flatten = (mask > 0).view(-1)
+        mask_flatten = (mask > 0).view(-1).detach()
         xyzs = xyzs.view(-1, 3)
 
         # random noise to make appearance more robust
@@ -743,7 +790,7 @@ class NeRFRenderer(nn.Module):
             rgbs[mask_flatten] = mask_rgbs.float()
 
         rgbs = rgbs.view(1, h, w, 3)
-        alphas = mask.float().detach()
+        alphas = mask.float()
         
         alphas = dr.antialias(alphas, rast, vertices_clip, self.triangles, pos_gradient_boost=self.opt.pos_gradient_boost).squeeze(0).clamp(0, 1)
         rgbs = dr.antialias(rgbs, rast, vertices_clip, self.triangles, pos_gradient_boost=self.opt.pos_gradient_boost).squeeze(0).clamp(0, 1)
@@ -771,6 +818,7 @@ class NeRFRenderer(nn.Module):
 
         results['depth'] = depth
         results['image'] = image
+        results['weights_sum'] = 1 - T
 
         # tmp: visualize accumulated triangle error by abusing depth
         # error_val = self.triangles_errors[trig_id.view(-1)].view(*prefix)
@@ -946,65 +994,37 @@ class NeRFRenderer(nn.Module):
         with torch.no_grad():
 
             tmp_grid = - torch.ones_like(self.density_grid)
-            
-            # full update.
-            if self.iter_density < 16:
-                X = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
-                Y = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
-                Z = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
+        
+            X = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
+            Y = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
+            Z = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_bitfield.device).split(S)
 
-                for xs in X:
-                    for ys in Y:
-                        for zs in Z:
-                            
-                            # construct points
-                            xx, yy, zz = custom_meshgrid(xs, ys, zs)
-                            coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
-                            indices = raymarching.morton3D(coords).long() # [N]
-                            xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
+            for xs in X:
+                for ys in Y:
+                    for zs in Z:
+                        
+                        # construct points
+                        xx, yy, zz = custom_meshgrid(xs, ys, zs)
+                        coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
+                        indices = raymarching.morton3D(coords).long() # [N]
+                        xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
-                            # cascading
-                            for cas in range(self.cascade):
-                                bound = min(2 ** cas, self.bound)
-                                half_grid_size = bound / self.grid_size
-                                # scale to current cascade's resolution
-                                cas_xyzs = xyzs * (bound - half_grid_size)
-                                # add noise in [-hgs, hgs]
-                                cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
-                                # query density
-                                with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                                    sigmas = self.density(cas_xyzs)['sigma'].reshape(-1).detach()
-                                # assign 
-                                tmp_grid[cas, indices] = sigmas
-
-            # partial update (half the computation)
-            else:
-                N = self.grid_size ** 3 // 4 # H * H * H / 4
-                for cas in range(self.cascade):
-                    # random sample some positions
-                    coords = torch.randint(0, self.grid_size, (N, 3), device=self.density_bitfield.device) # [N, 3], in [0, 128)
-                    indices = raymarching.morton3D(coords).long() # [N]
-                    # random sample occupied positions
-                    occ_indices = torch.nonzero(self.density_grid[cas] > 0).squeeze(-1) # [Nz]
-                    rand_mask = torch.randint(0, occ_indices.shape[0], [N], dtype=torch.long, device=self.density_bitfield.device)
-                    occ_indices = occ_indices[rand_mask] # [Nz] --> [N], allow for duplication
-                    occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
-                    # concat
-                    indices = torch.cat([indices, occ_indices], dim=0)
-                    coords = torch.cat([coords, occ_coords], dim=0)
-                    # same below
-                    xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
-                    bound = min(2 ** cas, self.bound)
-                    half_grid_size = bound / self.grid_size
-                    # scale to current cascade's resolution
-                    cas_xyzs = xyzs * (bound - half_grid_size)
-                    # add noise in [-hgs, hgs]
-                    cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
-                    # query density
-                    with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                        sigmas = self.density(cas_xyzs)['sigma'].reshape(-1).detach()
-                    # assign 
-                    tmp_grid[cas, indices] = sigmas
+                        # cascading
+                        for cas in range(self.cascade):
+                            bound = min(2 ** cas, self.bound)
+                            half_grid_size = bound / self.grid_size
+                            # scale to current cascade's resolution
+                            cas_xyzs = xyzs * (bound - half_grid_size)
+                            # add noise in [-hgs, hgs]
+                            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
+                            # query density
+                            with torch.cuda.amp.autocast(enabled=self.opt.fp16):
+                                sigmas = self.density(cas_xyzs)['sigma'].reshape(-1).detach()
+                                if self.opt.sdf:
+                                    inv_s = torch.exp(self.variance * 10.0).clip(1e-6, 1e6)
+                                    sigmas = torch.sigmoid(- sigmas * inv_s) * inv_s
+                            # assign 
+                            tmp_grid[cas, indices] = sigmas
 
             # ema update
             valid_mask = (self.density_grid >= 0) & (tmp_grid >= 0)
