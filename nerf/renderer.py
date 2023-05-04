@@ -330,18 +330,9 @@ class NeRFRenderer(nn.Module):
 
                 # check individual codes
                 if self.individual_dim > 0:
-                    if self.training:
-                        ind_code = self.individual_codes[index]
-                    # use a fixed ind code for the unknown test data.
-                    else:
-                        ind_code = self.individual_codes[[0]]
+                    ind_code = self.individual_codes[[0]]
                 else:
                     ind_code = None
-
-                # ray-wise to point-wise
-                if ind_code is not None and ind_code.shape[0] > 1:
-                    flatten_rays = raymarching.flatten_rays(rays, xyzs.shape[0]).long()
-                    ind_code = ind_code[flatten_rays]
 
                 # batched inference to avoid OOM
                 all_feats = []
@@ -387,8 +378,10 @@ class NeRFRenderer(nn.Module):
                 feats0 = cv2.resize(feats0, (w0, h0), interpolation=cv2.INTER_LINEAR)
                 feats1 = cv2.resize(feats1, (w0, h0), interpolation=cv2.INTER_LINEAR)
 
-            cv2.imwrite(os.path.join(path, f'feat0_{cas}.png'), feats0, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
-            cv2.imwrite(os.path.join(path, f'feat1_{cas}.png'), feats1, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            # cv2.imwrite(os.path.join(path, f'feat0_{cas}.png'), feats0, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            # cv2.imwrite(os.path.join(path, f'feat1_{cas}.png'), feats1, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            cv2.imwrite(os.path.join(path, f'feat0_{cas}.jpg'), feats0)
+            cv2.imwrite(os.path.join(path, f'feat1_{cas}.jpg'), feats1)
 
             # save obj (v, vt, f /)
             obj_file = os.path.join(path, f'mesh_{cas}.obj')
@@ -420,7 +413,7 @@ class NeRFRenderer(nn.Module):
                 fp.write(f'Tr 1 \n')
                 fp.write(f'illum 1 \n')
                 fp.write(f'Ns 0 \n')
-                fp.write(f'map_Kd feat0_{cas}.png \n')
+                fp.write(f'map_Kd feat0_{cas}.jpg \n')
         
         v = (self.vertices + self.vertices_offsets).detach()
         f = self.triangles.detach()

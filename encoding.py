@@ -60,6 +60,7 @@ class TCNN_hashgrid(nn.Module):
                 "per_level_scale": np.exp2(np.log2(desired_resolution / num_levels) / (num_levels - 1)),
                 "interpolation": "Smoothstep" if interpolation == 'smoothstep' else "Linear",
             },
+            dtype=torch.float32,
         )
         self.output_dim = self.encoder.n_output_dims # patch
     

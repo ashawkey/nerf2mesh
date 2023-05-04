@@ -59,6 +59,8 @@ if __name__ == '__main__':
     parser.add_argument('--diffuse_only', action='store_true', help="only train diffuse color by overriding --diffuse_step")
     parser.add_argument('--background', type=str, default='random', choices=['white', 'random'], help="training background mode")
     parser.add_argument('--enable_offset_nerf_grad', action='store_true', help="allow grad to pass through nerf to train vertices offsets in stage 1, only work for small meshes (e.g., synthetic dataset)")
+    parser.add_argument('--n_eval', type=int, default=5, help="eval $ times during training")
+    parser.add_argument('--n_ckpt', type=int, default=50, help="save $ times during training")
     
     # batch size related
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
@@ -138,10 +140,10 @@ if __name__ == '__main__':
     
     if opt.sdf:
         opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
-        opt.enable_offset_nerf_grad = True # lead to more sharp texture
         opt.lambda_tv = 0 # tcnn does not support inplace TV
         opt.density_thresh = 0.001 # use smaller thresh to suit density scale from sdf
         
+        opt.enable_offset_nerf_grad = True # lead to more sharp texture
         opt.refine_decimate_ratio = 0 # disable decimation
         opt.refine_size = 0 # disable subdivision
         
@@ -174,8 +176,8 @@ if __name__ == '__main__':
 
     model = NeRFNetwork(opt)
     
-    # criterion = torch.nn.MSELoss(reduction='none')
-    criterion = torch.nn.SmoothL1Loss(reduction='none')
+    criterion = torch.nn.MSELoss(reduction='none')
+    # criterion = torch.nn.SmoothL1Loss(reduction='none')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -213,8 +215,8 @@ if __name__ == '__main__':
         train_loader = NeRFDataset(opt, device=device, type=opt.train_split).dataloader()
 
         max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
-        save_interval = max(1, max_epoch // 50) # save ~50 times during the training
-        eval_interval = max(1, max_epoch // 10)
+        save_interval = max(1, max_epoch // max(opt.n_ckpt, 1))
+        eval_interval = max(1, max_epoch // max(opt.n_eval, 1))
         print(f'[INFO] max_epoch {max_epoch}, eval every {eval_interval}, save every {save_interval}.')
 
         if opt.ind_dim > 0:
@@ -225,8 +227,8 @@ if __name__ == '__main__':
             model.update_aabb(train_loader._data.pts_aabb)
 
         # scheduler = lambda optimizer: optim.lr_scheduler.MultiStepLR(optimizer, milestones=[opt.iters // 2, opt.iters * 3 // 4, opt.iters * 9 // 10], gamma=0.33)
-        scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
-        # scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.01 + 0.99 * (iter / 500) if iter <= 500 else 0.1 ** ((iter - 500) / (opt.iters - 500)))
+        # scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
+        scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.01 + 0.99 * (iter / 500) if iter <= 500 else 0.1 ** ((iter - 500) / (opt.iters - 500)))
 
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95 if opt.stage == 0 else None, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, use_checkpoint=opt.ckpt, eval_interval=eval_interval, save_interval=save_interval)
 

@@ -1,1 +1,16 @@
-**/__pycache__
+__pycache__/
+build/
+*.egg-info/
+*.so
+
+tmp*
+data/
+data
+trial*/
+.vs/
+
+*.ckpt
+*wos*
+ablation.sh
+runall_firekeeper*
+runall_dtu*
