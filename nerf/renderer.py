@@ -328,13 +328,28 @@ class NeRFRenderer(nn.Module):
             if mask.any():
                 xyzs = xyzs[mask] # [M, 3]
 
+                # check individual codes
+                if self.individual_dim > 0:
+                    if self.training:
+                        ind_code = self.individual_codes[index]
+                    # use a fixed ind code for the unknown test data.
+                    else:
+                        ind_code = self.individual_codes[[0]]
+                else:
+                    ind_code = None
+
+                # ray-wise to point-wise
+                if ind_code is not None and ind_code.shape[0] > 1:
+                    flatten_rays = raymarching.flatten_rays(rays, xyzs.shape[0]).long()
+                    ind_code = ind_code[flatten_rays]
+
                 # batched inference to avoid OOM
                 all_feats = []
                 head = 0
                 while head < xyzs.shape[0]:
                     tail = min(head + 640000, xyzs.shape[0])
                     with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                        all_feats.append(self.geo_feat(xyzs[head:tail]).float())
+                        all_feats.append(self.geo_feat(xyzs[head:tail], ind_code).float())
                     head += 640000
 
                 feats[mask] = torch.cat(all_feats, dim=0)
