@@ -330,18 +330,9 @@ class NeRFRenderer(nn.Module):
 
                 # check individual codes
                 if self.individual_dim > 0:
-                    if self.training:
-                        ind_code = self.individual_codes[index]
-                    # use a fixed ind code for the unknown test data.
-                    else:
-                        ind_code = self.individual_codes[[0]]
+                    ind_code = self.individual_codes[[0]]
                 else:
                     ind_code = None
-
-                # ray-wise to point-wise
-                if ind_code is not None and ind_code.shape[0] > 1:
-                    flatten_rays = raymarching.flatten_rays(rays, xyzs.shape[0]).long()
-                    ind_code = ind_code[flatten_rays]
 
                 # batched inference to avoid OOM
                 all_feats = []
