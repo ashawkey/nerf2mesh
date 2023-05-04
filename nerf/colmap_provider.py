@@ -507,7 +507,7 @@ class ColmapDataset:
         results = {'H': self.H, 'W': self.W}
 
         # if use sparse depth supervision, randomly use sparse depth.
-        if self.opt.enable_sparse_depth and self.opt.stage == 0 and \
+        if self.opt.enable_sparse_depth and self.training and self.opt.stage == 0 and \
             random.random() > 0.9:
 
             depth_coords, depth, depth_weight = self.sparse_depth_info[index[0]]

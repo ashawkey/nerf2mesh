@@ -387,8 +387,10 @@ class NeRFRenderer(nn.Module):
                 feats0 = cv2.resize(feats0, (w0, h0), interpolation=cv2.INTER_LINEAR)
                 feats1 = cv2.resize(feats1, (w0, h0), interpolation=cv2.INTER_LINEAR)
 
-            cv2.imwrite(os.path.join(path, f'feat0_{cas}.png'), feats0, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
-            cv2.imwrite(os.path.join(path, f'feat1_{cas}.png'), feats1, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            # cv2.imwrite(os.path.join(path, f'feat0_{cas}.png'), feats0, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            # cv2.imwrite(os.path.join(path, f'feat1_{cas}.png'), feats1, [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression_level])
+            cv2.imwrite(os.path.join(path, f'feat0_{cas}.jpg'), feats0)
+            cv2.imwrite(os.path.join(path, f'feat1_{cas}.jpg'), feats1)
 
             # save obj (v, vt, f /)
             obj_file = os.path.join(path, f'mesh_{cas}.obj')
@@ -420,7 +422,7 @@ class NeRFRenderer(nn.Module):
                 fp.write(f'Tr 1 \n')
                 fp.write(f'illum 1 \n')
                 fp.write(f'Ns 0 \n')
-                fp.write(f'map_Kd feat0_{cas}.png \n')
+                fp.write(f'map_Kd feat0_{cas}.jpg \n')
         
         v = (self.vertices + self.vertices_offsets).detach()
         f = self.triangles.detach()
