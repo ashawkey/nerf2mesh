@@ -707,7 +707,7 @@ class Trainer(object):
         else:
             mvp = data['mvp'].squeeze(0) # [4, 4]
             H, W = data['H'], data['W']
-            outputs = self.model.render_stage1(rays_o, rays_d, mvp, H, W, bg_color=bg_color, shading=shading, **vars(self.opt))
+            outputs = self.model.render_stage1(rays_o, rays_d, mvp, H, W, index=index, bg_color=bg_color, shading=shading, **vars(self.opt))
 
             pred_rgb = outputs['image']
             loss = self.opt.lambda_rgb * self.criterion(pred_rgb, gt_rgb).mean(-1) # [H, W]
