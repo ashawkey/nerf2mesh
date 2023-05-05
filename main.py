@@ -40,6 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--enable_cam_center', action='store_true', help="use camera center instead of sparse point center (colmap dataset only)")
     parser.add_argument('--min_near', type=float, default=0.05, help="minimum near distance for camera")
     parser.add_argument('--enable_sparse_depth', action='store_true', help="use sparse depth from colmap pts3d, only valid if using --data_formt colmap")
+    parser.add_argument('--sparse_depth_ratio', type=float, default=.9, help="amount of depth supervision, decrease it when poses are not correctly estimated")
     parser.add_argument('--enable_dense_depth', action='store_true', help="use dense depth from omnidepth calibrated to colmap pts3d, only valid if using --data_formt colmap")
 
     ### training options

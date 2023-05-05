@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 import raymarching
 import nvdiffrast.torch as dr
+glctx = dr.RasterizeGLContext(output_db=False)
 
 import xatlas
 import matplotlib.pyplot as plt

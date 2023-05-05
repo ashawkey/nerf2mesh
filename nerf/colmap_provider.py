@@ -270,12 +270,16 @@ class ColmapDataset:
                 self.cam_near_far.append([np.min(depth), np.max(depth)])
 
                 # sparse depth info
+                # drop out unconfident and remote points
+                pts_ids = depth < np.min(depth) + (np.max(depth) - np.min(depth))*0.2
+                pts_ids = np.logical_and(weight.astype(np.float32) > 2 - 2*self.opt.sparse_depth_ratio, pts_ids)
                 if self.opt.enable_sparse_depth:
                     self.sparse_depth_info.append([
-                        torch.from_numpy(xys.astype(np.float32)),
-                        torch.from_numpy(depth.astype(np.float32)),
-                        torch.from_numpy(weight.astype(np.float32))
+                        torch.from_numpy(xys.astype(np.float32))[pts_ids],
+                        torch.from_numpy(depth.astype(np.float32))[pts_ids],
+                        torch.from_numpy(weight.astype(np.float32))[pts_ids]
                     ])
+
 
                 # dense depth info
                 if self.opt.enable_dense_depth:
