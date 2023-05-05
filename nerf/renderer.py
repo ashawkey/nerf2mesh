@@ -815,7 +815,7 @@ class NeRFRenderer(nn.Module):
             image = scale_img_hwc(image, (h0, w0))
             depth = scale_img_hwc(depth, (h0, w0))
             T = scale_img_hwc(T, (h0, w0))
-            trig_id = scale_img_hw(trig_id.float(), (h0, w0), mag='nearest', min='nearest').long()
+            trig_id = scale_img_hw(trig_id.float(), (h0, w0), mag='nearest', min='nearest')
         
         self.triangles_errors_id = trig_id
 
@@ -842,7 +842,7 @@ class NeRFRenderer(nn.Module):
         # loss: [H, W], detached!
 
         # always call after render_stage1, so self.triangles_errors_id is not None.
-        indices = self.triangles_errors_id.view(-1)
+        indices = self.triangles_errors_id.view(-1).long()
         mask = (indices >= 0)
 
         indices = indices[mask].contiguous()
