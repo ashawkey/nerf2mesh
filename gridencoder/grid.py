@@ -178,7 +178,7 @@ class GridEncoder(nn.Module):
         S = np.log2(self.per_level_scale) # resolution multiplier at each level, apply log2 for later CUDA exp2f
         H = self.base_resolution # base resolution
 
-        if inputs is None inputs.size(0) == 0:
+        if inputs is None or inputs.size(0) == 0:
             # randomized in [0, 1]
             inputs = torch.rand(B, self.input_dim, device=self.embeddings.device)
         else:
