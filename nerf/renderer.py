@@ -202,7 +202,6 @@ class NeRFRenderer(nn.Module):
             mask = np.ones_like(errors)
 
         else:
-            mask = np.zeros_like(errors)
 
             cnt = self.triangles_errors_cnt.cpu().numpy()
             cnt_mask = cnt > 0
@@ -216,6 +215,7 @@ class NeRFRenderer(nn.Module):
             thresh_refine = np.percentile(errors[cnt_mask], 90)
             thresh_decimate = np.percentile(errors[cnt_mask], 50)
 
+            mask = np.zeros_like(errors)
             mask[(errors > thresh_refine) & cnt_mask] = 2
             mask[(errors < thresh_decimate) & cnt_mask] = 1
 
