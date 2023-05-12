@@ -435,11 +435,11 @@ function init() {
             for (let cas = 0; cas < cascade; cas++) {
 
                 // load feature texture
-                let tex0 = new THREE.TextureLoader().load(BASE+name+'/feat0_'+cas.toString()+'.png', object => {
+                let tex0 = new THREE.TextureLoader().load(BASE+name+'/feat0_'+cas.toString()+'.jpg', object => {
                     console.log('[INFO] loaded diffuse tex:', name, cas);
                     updateProgressBar(name, cas * 3 + 1);
                 });
-                let tex1 = new THREE.TextureLoader().load(BASE+name+'/feat1_'+cas.toString()+'.png', object => {
+                let tex1 = new THREE.TextureLoader().load(BASE+name+'/feat1_'+cas.toString()+'.jpg', object => {
                     console.log('[INFO] loaded specular tex:', name, cas);
                     updateProgressBar(name, cas * 3 + 2);
                 });

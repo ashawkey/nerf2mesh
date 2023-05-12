@@ -203,7 +203,6 @@ class NeRFRenderer(nn.Module):
             mask = np.ones_like(errors)
 
         else:
-            mask = np.zeros_like(errors)
 
             cnt = self.triangles_errors_cnt.cpu().numpy()
             cnt_mask = cnt > 0
@@ -217,6 +216,7 @@ class NeRFRenderer(nn.Module):
             thresh_refine = np.percentile(errors[cnt_mask], 90)
             thresh_decimate = np.percentile(errors[cnt_mask], 50)
 
+            mask = np.zeros_like(errors)
             mask[(errors > thresh_refine) & cnt_mask] = 2
             mask[(errors < thresh_decimate) & cnt_mask] = 1
 
@@ -816,7 +816,7 @@ class NeRFRenderer(nn.Module):
             image = scale_img_hwc(image, (h0, w0))
             depth = scale_img_hwc(depth, (h0, w0))
             T = scale_img_hwc(T, (h0, w0))
-            trig_id = scale_img_hw(trig_id.float(), (h0, w0), mag='nearest', min='nearest').long()
+            trig_id = scale_img_hw(trig_id.float(), (h0, w0), mag='nearest', min='nearest')
         
         self.triangles_errors_id = trig_id
 
@@ -843,7 +843,7 @@ class NeRFRenderer(nn.Module):
         # loss: [H, W], detached!
 
         # always call after render_stage1, so self.triangles_errors_id is not None.
-        indices = self.triangles_errors_id.view(-1)
+        indices = self.triangles_errors_id.view(-1).long()
         mask = (indices >= 0)
 
         indices = indices[mask].contiguous()
