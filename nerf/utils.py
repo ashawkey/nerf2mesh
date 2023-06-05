@@ -590,6 +590,8 @@ class Trainer(object):
 
             if self.use_checkpoint == "scratch":
                 self.log("[INFO] Training from scratch ...")
+                if self.opt.stage == 0:
+                    self.model.init_double_sphere()
             elif self.use_checkpoint == "latest":
                 self.log("[INFO] Loading latest checkpoint ...")
                 self.load_checkpoint()
@@ -1412,6 +1414,8 @@ class Trainer(object):
                 self.log(f"[INFO] Latest checkpoint is {checkpoint}")
             else:
                 self.log("[WARN] No checkpoint found, abort loading latest model.")
+                if self.opt.stage == 0:
+                    self.model.init_double_sphere()
                 return
 
         checkpoint_dict = torch.load(checkpoint, map_location=self.device)
