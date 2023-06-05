@@ -22,6 +22,24 @@ from scipy.ndimage import binary_dilation, binary_erosion
 from .utils import custom_meshgrid, plot_pointcloud, safe_normalize
 from meshutils import *
 
+def contract(xyzs):
+    if isinstance(xyzs, np.ndarray):
+        mag = np.max(np.abs(xyzs), axis=1, keepdims=True)
+        xyzs = np.where(mag <= 1, xyzs, xyzs * (2 - 1 / mag) / mag)
+    else:
+        mag = torch.amax(torch.abs(xyzs), dim=1, keepdim=True)
+        xyzs = torch.where(mag <= 1, xyzs, xyzs * (2 - 1 / mag) / mag)
+    return xyzs
+
+def uncontract(xyzs):
+    if isinstance(xyzs, np.ndarray):
+        mag = np.max(np.abs(xyzs), axis=1, keepdims=True)
+        xyzs = np.where(mag <= 1, xyzs, xyzs * (1 / (2 * mag - mag * mag)))
+    else:
+        mag = torch.amax(torch.abs(xyzs), dim=1, keepdim=True)
+        xyzs = torch.where(mag <= 1, xyzs, xyzs * (1 / (2 * mag - mag * mag)))
+    return xyzs
+
 # import torch_scatter
 TORCH_SCATTER = None # lazy import
 
@@ -66,6 +84,8 @@ class NeRFRenderer(nn.Module):
         self.grid_size = opt.grid_size
         self.min_near = opt.min_near
         self.density_thresh = opt.density_thresh
+
+        self.max_level = 16
 
         # prepare aabb with a 6D tensor (xmin, ymin, zmin, xmax, ymax, zmax)
         # NOTE: aabb (can be rectangular) is only used to generate points, we still rely on bound (always cubic) to calculate density grid and hashing.
@@ -196,20 +216,20 @@ class NeRFRenderer(nn.Module):
 
         errors = self.triangles_errors.cpu().numpy()
 
+        cnt = self.triangles_errors_cnt.cpu().numpy()
+        cnt_mask = cnt > 0
+        errors[cnt_mask] = errors[cnt_mask] / cnt[cnt_mask]
+
+        # only care about the inner mesh
+        errors = errors[:self.f_cumsum[1]]
+        cnt_mask = cnt_mask[:self.f_cumsum[1]]
+
         if self.opt.sdf:
 
             # sdf mode: just set all faces to decimation & remesh.
             mask = np.ones_like(errors)
 
         else:
-
-            cnt = self.triangles_errors_cnt.cpu().numpy()
-            cnt_mask = cnt > 0
-            errors[cnt_mask] = errors[cnt_mask] / cnt[cnt_mask]
-
-            # only care about the inner mesh
-            errors = errors[:self.f_cumsum[1]]
-            cnt_mask = cnt_mask[:self.f_cumsum[1]]
 
             # find a threshold to decide whether we perform subdivision / decimation.
             thresh_refine = np.percentile(errors[cnt_mask], 90)
@@ -289,9 +309,9 @@ class NeRFRenderer(nn.Module):
 
             print(f'[INFO] running xatlas to unwrap UVs for mesh: v={v_np.shape} f={f_np.shape}')
 
-            # unwrap uvs
+            # unwrap uv in contracted space
             atlas = xatlas.Atlas()
-            atlas.add_mesh(v_np, f_np)
+            atlas.add_mesh(contract(v_np) if self.opt.contract else v_np, f_np)
             chart_options = xatlas.ChartOptions()
             chart_options.max_iterations = 0 # disable merge_chart for faster unwrap...
             pack_options = xatlas.PackOptions()
@@ -322,6 +342,9 @@ class NeRFRenderer(nn.Module):
             # masked query 
             xyzs = xyzs.view(-1, 3)
             mask = (mask > 0).view(-1)
+
+            if self.opt.contract:
+                xyzs = contract(xyzs)
             
             feats = torch.zeros(h * w, 6, device=device, dtype=torch.float32)
 
@@ -424,7 +447,7 @@ class NeRFRenderer(nn.Module):
             _export_obj(cur_v, cur_f, h0, w0, self.opt.ssaa, cas)
 
             # half the texture resolution for remote area.
-            if h0 > 2048 and w0 > 2048:
+            if not self.opt.sdf and h0 > 2048 and w0 > 2048:
                 h0 //= 2
                 w0 //= 2
 
@@ -522,73 +545,131 @@ class NeRFRenderer(nn.Module):
 
         # for the outer mesh [1, inf]
         if self.bound > 1:
+            
+            if self.opt.sdf:
+                # assume background contracted in [-2, 2], process it specially
+                sigmas = torch.zeros([resolution] * 3, dtype=torch.float32, device=device)
+                for xi, xs in enumerate(X):
+                    for yi, ys in enumerate(Y):
+                        for zi, zs in enumerate(Z):
+                            xx, yy, zz = custom_meshgrid(xs, ys, zs)
+                            pts = 2 * torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [S, 3]
+                            with torch.cuda.amp.autocast(enabled=self.opt.fp16):
+                                val = self.density(pts.to(device))['sigma'] # [S, 1]
+                            sigmas[xi * S: xi * S + len(xs), yi * S: yi * S + len(ys), zi * S: zi * S + len(zs)] = val.reshape(len(xs), len(ys), len(zs)) 
+                sigmas = torch.nan_to_num(sigmas, 0)
+                sigmas = sigmas.cpu().numpy()
 
-            reso = self.grid_size
-            target_reso = self.opt.env_reso
-            decimate_target //= 2 # empirical...
+                vertices_out, triangles_out = mcubes.marching_cubes(-sigmas, 0)
 
-            all_indices = torch.arange(reso**3, device=device, dtype=torch.int)
-            all_coords = raymarching.morton3D_invert(all_indices).cpu().numpy()
+                vertices_out = vertices_out / (resolution - 1.0) * 2 - 1
+                vertices_out = vertices_out.astype(np.float32)
+                triangles_out = triangles_out.astype(np.int32)
 
-            # for each cas >= 1
-            for cas in range(1, self.cascade):
-                bound = min(2 ** cas, self.bound)
-                half_grid_size = bound / target_reso
-
-                # remap from density_grid
-                occ = torch.zeros([reso] * 3, dtype=torch.float32, device=device)
-                occ[tuple(all_coords.T)] = self.density_grid[cas]
-
-                # remove the center (before mcubes)
-                # occ[reso // 4 : reso * 3 // 4, reso // 4 : reso * 3 // 4, reso // 4 : reso * 3 // 4] = 0
-
-                # interpolate the occ grid to desired resolution to control mesh size...
-                occ = F.interpolate(occ.unsqueeze(0).unsqueeze(0), [target_reso] * 3, mode='trilinear').squeeze(0).squeeze(0)
-                occ = torch.nan_to_num(occ, 0)
-                occ = (occ > density_thresh).cpu().numpy()
-
-                vertices_out, triangles_out = mcubes.marching_cubes(occ, 0.5)
-
-                vertices_out = vertices_out / (target_reso - 1.0) * 2 - 1 # range in [-1, 1]
-
-                # remove the center (already covered by previous cascades)
-                _r = 0.45
+                _r = 0.5
                 vertices_out, triangles_out = remove_selected_verts(vertices_out, triangles_out, f'(x <= {_r}) && (x >= -{_r}) && (y <= {_r}) && (y >= -{_r}) && (z <= {_r} ) && (z >= -{_r})')
-                if vertices_out.shape[0] == 0: continue
+
+                bound = 2
+                half_grid_size = bound / resolution
 
                 vertices_out = vertices_out * (bound - half_grid_size)
-
-                # remove the out-of-AABB region
-                xmn, ymn, zmn, xmx, ymx, zmx = self.aabb_train.cpu().numpy().tolist()
-                xmn += half_grid_size
-                ymn += half_grid_size
-                zmn += half_grid_size
-                xmx -= half_grid_size
-                ymx -= half_grid_size
-                zmx -= half_grid_size
-                vertices_out, triangles_out = remove_selected_verts(vertices_out, triangles_out, f'(x <= {xmn}) || (x >= {xmx}) || (y <= {ymn}) || (y >= {ymx}) || (z <= {zmn} ) || (z >= {zmx})')
 
                 # clean mesh
                 vertices_out, triangles_out = clean_mesh(vertices_out, triangles_out, min_f=self.opt.clean_min_f, min_d=self.opt.clean_min_d, repair=False, remesh=False)
 
-                if vertices_out.shape[0] == 0: continue
-
                 # decimate
+                decimate_target *= 2
                 if decimate_target > 0 and triangles_out.shape[0] > decimate_target:
                     vertices_out, triangles_out = decimate_mesh(vertices_out, triangles_out, decimate_target, optimalplacement=False)
 
                 vertices_out = vertices_out.astype(np.float32)
                 triangles_out = triangles_out.astype(np.int32)
 
-                print(f'[INFO] exporting outer mesh at cas {cas}, v = {vertices_out.shape}, f = {triangles_out.shape}')
-        
+                # warp back (uncontract)
+                vertices_out = uncontract(vertices_out)
+
+                # remove the out-of-AABB region
+                xmn, ymn, zmn, xmx, ymx, zmx = self.aabb_train.cpu().numpy().tolist()
+                vertices_out, triangles_out = remove_selected_verts(vertices_out, triangles_out, f'(x <= {xmn}) || (x >= {xmx}) || (y <= {ymn}) || (y >= {ymx}) || (z <= {zmn} ) || (z >= {zmx})')
+
                 if dataset is not None:
                     visibility_mask = self.mark_unseen_triangles(vertices_out, triangles_out, dataset.mvps, dataset.H, dataset.W).cpu().numpy()
                     vertices_out, triangles_out = remove_masked_trigs(vertices_out, triangles_out, visibility_mask, dilation=self.opt.visibility_mask_dilation)
+
+                print(f'[INFO] exporting outer mesh at cas 1, v = {vertices_out.shape}, f = {triangles_out.shape}')
                 
                 # vertices_out, triangles_out = clean_mesh(vertices_out, triangles_out, min_f=self.opt.clean_min_f, min_d=self.opt.clean_min_d, repair=False, remesh=False)
                 mesh_out = trimesh.Trimesh(vertices_out, triangles_out, process=False) # important, process=True leads to seg fault...
-                mesh_out.export(os.path.join(save_path, f'mesh_{cas}.ply'))
+                mesh_out.export(os.path.join(save_path, f'mesh_1.ply'))
+
+                
+            else:
+                reso = self.grid_size
+                target_reso = self.opt.env_reso
+                decimate_target //= 2 # empirical...
+
+                all_indices = torch.arange(reso**3, device=device, dtype=torch.int)
+                all_coords = raymarching.morton3D_invert(all_indices).cpu().numpy()
+
+                # for each cas >= 1
+                for cas in range(1, self.cascade):
+                    bound = min(2 ** cas, self.bound)
+                    half_grid_size = bound / target_reso
+
+                    # remap from density_grid
+                    occ = torch.zeros([reso] * 3, dtype=torch.float32, device=device)
+                    occ[tuple(all_coords.T)] = self.density_grid[cas]
+
+                    # remove the center (before mcubes)
+                    # occ[reso // 4 : reso * 3 // 4, reso // 4 : reso * 3 // 4, reso // 4 : reso * 3 // 4] = 0
+
+                    # interpolate the occ grid to desired resolution to control mesh size...
+                    occ = F.interpolate(occ.unsqueeze(0).unsqueeze(0), [target_reso] * 3, mode='trilinear').squeeze(0).squeeze(0)
+                    occ = torch.nan_to_num(occ, 0)
+                    occ = (occ > density_thresh).cpu().numpy()
+
+                    vertices_out, triangles_out = mcubes.marching_cubes(occ, 0.5)
+
+                    vertices_out = vertices_out / (target_reso - 1.0) * 2 - 1 # range in [-1, 1]
+
+                    # remove the center (already covered by previous cascades)
+                    _r = 0.45
+                    vertices_out, triangles_out = remove_selected_verts(vertices_out, triangles_out, f'(x <= {_r}) && (x >= -{_r}) && (y <= {_r}) && (y >= -{_r}) && (z <= {_r} ) && (z >= -{_r})')
+                    if vertices_out.shape[0] == 0: continue
+
+                    vertices_out = vertices_out * (bound - half_grid_size)
+
+                    # remove the out-of-AABB region
+                    xmn, ymn, zmn, xmx, ymx, zmx = self.aabb_train.cpu().numpy().tolist()
+                    xmn += half_grid_size
+                    ymn += half_grid_size
+                    zmn += half_grid_size
+                    xmx -= half_grid_size
+                    ymx -= half_grid_size
+                    zmx -= half_grid_size
+                    vertices_out, triangles_out = remove_selected_verts(vertices_out, triangles_out, f'(x <= {xmn}) || (x >= {xmx}) || (y <= {ymn}) || (y >= {ymx}) || (z <= {zmn} ) || (z >= {zmx})')
+
+                    # clean mesh
+                    vertices_out, triangles_out = clean_mesh(vertices_out, triangles_out, min_f=self.opt.clean_min_f, min_d=self.opt.clean_min_d, repair=False, remesh=False)
+
+                    if vertices_out.shape[0] == 0: continue
+
+                    # decimate
+                    if decimate_target > 0 and triangles_out.shape[0] > decimate_target:
+                        vertices_out, triangles_out = decimate_mesh(vertices_out, triangles_out, decimate_target, optimalplacement=False)
+
+                    vertices_out = vertices_out.astype(np.float32)
+                    triangles_out = triangles_out.astype(np.int32)
+
+                    print(f'[INFO] exporting outer mesh at cas {cas}, v = {vertices_out.shape}, f = {triangles_out.shape}')
+            
+                    if dataset is not None:
+                        visibility_mask = self.mark_unseen_triangles(vertices_out, triangles_out, dataset.mvps, dataset.H, dataset.W).cpu().numpy()
+                        vertices_out, triangles_out = remove_masked_trigs(vertices_out, triangles_out, visibility_mask, dilation=self.opt.visibility_mask_dilation)
+                    
+                    # vertices_out, triangles_out = clean_mesh(vertices_out, triangles_out, min_f=self.opt.clean_min_f, min_d=self.opt.clean_min_d, repair=False, remesh=False)
+                    mesh_out = trimesh.Trimesh(vertices_out, triangles_out, process=False) # important, process=True leads to seg fault...
+                    mesh_out.export(os.path.join(save_path, f'mesh_{cas}.ply'))
 
 
     # phase 0 continuous training
@@ -784,8 +865,10 @@ class NeRFRenderer(nn.Module):
         xyzs = xyzs.view(-1, 3)
 
         # random noise to make appearance more robust
-        if self.training:
-            xyzs = xyzs + torch.randn_like(xyzs) * 1e-3
+        # if self.training:
+        #     xyzs = xyzs + torch.randn_like(xyzs) * 1e-3
+        if self.opt.contract:
+            xyzs = contract(xyzs)
 
         rgbs = torch.zeros(h * w, 3, device=device, dtype=torch.float32)
 

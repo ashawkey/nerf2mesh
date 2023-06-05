@@ -92,7 +92,7 @@ class NeRFNetwork(NeRFRenderer):
     def density(self, x):
 
         # sigma
-        h = self.encoder(x, bound=self.bound)
+        h = self.encoder(x, bound=self.bound, max_level=self.max_level)
         h = torch.cat([x, h], dim=-1)
         h = self.sigma_net(h)
 
@@ -134,7 +134,7 @@ class NeRFNetwork(NeRFRenderer):
 
     def geo_feat(self, x, c=None):
 
-        h = self.encoder_color(x, bound=self.bound)
+        h = self.encoder_color(x, bound=self.bound, max_level=self.max_level)
         h = torch.cat([x, h], dim=-1)
         if c is not None:
             h = torch.cat([h, c.repeat(x.shape[0], 1) if c.shape[0] == 1 else c], dim=-1)

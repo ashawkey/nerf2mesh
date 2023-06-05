@@ -19,6 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--fp16', action='store_true', help="use amp mixed precision training")
     parser.add_argument('--sdf', action='store_true', help="use sdf instead of density for nerf")
     parser.add_argument('--tcnn', action='store_true', help="use tcnn's gridencoder")
+    parser.add_argument('--progressive_level', action='store_true', help="progressively increase max_level")
 
     ### testing options
     parser.add_argument('--test', action='store_true', help="test mode")
@@ -134,19 +135,26 @@ if __name__ == '__main__':
         opt.adaptive_num_rays = True
         opt.refine = True
     
-    if opt.contract:
-        # mark untrained is not very correct in contraction mode...
-        opt.mark_untrained = False
-    
     if opt.sdf:
-        opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
-        opt.lambda_tv = 0 # tcnn does not support inplace TV
+        # opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
+        # opt.lambda_tv = 0 # tcnn does not support inplace TV
         opt.density_thresh = 0.001 # use smaller thresh to suit density scale from sdf
+        if opt.stage == 0:
+            opt.progressive_level = True
+
+        # contract background
+        if opt.bound > 1:
+            opt.contract = True
         
         opt.enable_offset_nerf_grad = True # lead to more sharp texture
+
+        # just perform remesh periodically
         opt.refine_decimate_ratio = 0 # disable decimation
         opt.refine_size = 0 # disable subdivision
         
+    if opt.contract:
+        # mark untrained is not very correct in contraction mode...
+        opt.mark_untrained = False
     
     # best rendering quality at the sacrifice of mesh quality
     if opt.wo_smooth:
