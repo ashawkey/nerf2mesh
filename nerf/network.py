@@ -62,54 +62,69 @@ class NeRFNetwork(NeRFRenderer):
 
         super().__init__(opt)
 
-        # density network
+        # sdf network
         self.encoder, self.in_dim_density = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=1, desired_resolution=2048 * self.bound, interpolation='linear')
-        # self.sigma_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=self.opt.sdf, geom_init=self.opt.sdf, weight_norm=self.opt.sdf)
-        self.sigma_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=False)
+        self.sdf_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=False)
 
-        # color network
-        self.encoder_color, self.in_dim_color = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
-        self.color_net = MLP(3 + self.in_dim_color + self.individual_dim, 3 + specular_dim, 64, 3, bias=False)
+        # materials network
+        self.encoder_material, self.in_dim_material = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
+        self.material_net = MLP(3 + self.in_dim_material + self.individual_dim, 3 + 1 + 1, 64, 3, bias=False)
 
-        self.encoder_dir, self.in_dim_dir = get_encoder("None")
-        self.specular_net = MLP(specular_dim + self.in_dim_dir, 3, 32, 2, bias=False)
+        # lighting network (pure mlp)
+        self.encoder_dir, self.in_dim_dir = get_encoder("ide", degree=5)
+        self.diffuse_light_net = MLP(self.in_dim_dir, 3, 128, 3, bias=False)
+        self.specular_light_net = MLP(self.in_dim_dir, 3, 128, 3, bias=False)
 
-        # sdf
-        if self.opt.sdf:
-            self.register_parameter('variance', nn.Parameter(torch.tensor(0.3, dtype=torch.float32)))
+        # sdf variance
+        self.register_parameter('variance', nn.Parameter(torch.tensor(0.3, dtype=torch.float32)))
 
-    def forward(self, x, d, c=None, shading='full'):
+    def forward(self, x, c=None):
         # x: [N, 3], in [-bound, bound]
-        # d: [N, 3], nomalized in [-1, 1]
         # c: [1/N, individual_dim]
 
-        sigma = self.density(x)['sigma']
-        color, specular = self.rgb(x, d, c, shading)
+        sdf = self.sdf(x)
+        albedo, metallic, roughness = self.materials(x, c)
 
-        return sigma, color, specular
+        return sdf, albedo, metallic, roughness
+    
+    def lighting(self, normal, reflective, roughness):
+        
+        diffuse_light = self.diffuse_light_net(self.encoder_dir(normal))
+        specular_light = self.specular_light_net(self.encoder_dir(reflective, roughness))
+        
+        diffuse_light = torch.exp(diffuse_light.clamp(max=5))
+        specular_light = torch.exp(specular_light.clamp(max=5))
 
+        return diffuse_light, specular_light
 
-    def density(self, x):
+    def sdf(self, x):
 
-        # sigma
         h = self.encoder(x, bound=self.bound, max_level=self.max_level)
         h = torch.cat([x, h], dim=-1)
-        h = self.sigma_net(h)
+        h = self.sdf_net(h)
 
-        results = {}
+        sdf = h[..., 0].float() # sdf
 
-        if self.opt.sdf:
-            sigma = h[..., 0].float() # sdf
-        else:
-            sigma = trunc_exp(h[..., 0])
+        return sdf
 
-        results['sigma'] = sigma
+    def materials(self, x, c=None):
 
-        return results
+        h = self.encoder_material(x, bound=self.bound, max_level=self.max_level)
+        h = torch.cat([x, h], dim=-1)
+        if c is not None:
+            h = torch.cat([h, c.repeat(x.shape[0], 1) if c.shape[0] == 1 else c], dim=-1)
+        h = self.material_net(h)
+        materials = torch.sigmoid(h)
+
+        albedo = materials[..., :3]
+        metallic = materials[..., 3:4]
+        roughness = materials[..., 4:5]
+
+        return albedo, metallic, roughness
 
     # init the sdf to two spheres by pretraining, assume view cameras fall between the spheres
     def init_double_sphere(self, r1=0.5, r2=1.5, iters=8192, batch_size=8192):
-        assert self.opt.sdf, 'sphere init is only for sdf mode!'
+
         # import kiui
         import tqdm
         loss_fn = torch.nn.MSELoss()
@@ -121,7 +136,7 @@ class NeRFNetwork(NeRFRenderer):
             d = torch.norm(xyzs, p=2, dim=-1)
             gt_sdf = torch.where(d < (r1 + r2) / 2, d - r1, r2 - d)
             # kiui.lo(xyzs, gt_sdf)
-            pred_sdf = self.density(xyzs)['sigma']
+            pred_sdf = self.sdf(xyzs)
             loss = loss_fn(pred_sdf, gt_sdf)
             optimizer.zero_grad()
             loss.backward()
@@ -135,15 +150,15 @@ class NeRFNetwork(NeRFRenderer):
         if self.opt.tcnn:
             with torch.enable_grad():
                 x.requires_grad_(True)
-                sigma = self.density(x)['sigma']
-                normal = torch.autograd.grad(torch.sum(sigma), x, create_graph=True)[0] # [N, 3]
+                sdf = self.sdf(x)
+                normal = torch.autograd.grad(torch.sum(sdf), x, create_graph=True)[0] # [N, 3]
         else:
-            dx_pos = self.density((x + torch.tensor([[epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
-            dx_neg = self.density((x + torch.tensor([[-epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
-            dy_pos = self.density((x + torch.tensor([[0.00, epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
-            dy_neg = self.density((x + torch.tensor([[0.00, -epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
-            dz_pos = self.density((x + torch.tensor([[0.00, 0.00, epsilon]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
-            dz_neg = self.density((x + torch.tensor([[0.00, 0.00, -epsilon]], device=x.device)).clamp(-self.bound, self.bound))['sigma']
+            dx_pos = self.sdf((x + torch.tensor([[epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))
+            dx_neg = self.sdf((x + torch.tensor([[-epsilon, 0.00, 0.00]], device=x.device)).clamp(-self.bound, self.bound))
+            dy_pos = self.sdf((x + torch.tensor([[0.00, epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))
+            dy_neg = self.sdf((x + torch.tensor([[0.00, -epsilon, 0.00]], device=x.device)).clamp(-self.bound, self.bound))
+            dz_pos = self.sdf((x + torch.tensor([[0.00, 0.00, epsilon]], device=x.device)).clamp(-self.bound, self.bound))
+            dz_neg = self.sdf((x + torch.tensor([[0.00, 0.00, -epsilon]], device=x.device)).clamp(-self.bound, self.bound))
             
             normal = torch.stack([
                 0.5 * (dx_pos - dx_neg) / epsilon, 
@@ -153,40 +168,6 @@ class NeRFNetwork(NeRFRenderer):
 
         return normal
     
-
-    def geo_feat(self, x, c=None):
-
-        h = self.encoder_color(x, bound=self.bound, max_level=self.max_level)
-        h = torch.cat([x, h], dim=-1)
-        if c is not None:
-            h = torch.cat([h, c.repeat(x.shape[0], 1) if c.shape[0] == 1 else c], dim=-1)
-        h = self.color_net(h)
-        geo_feat = torch.sigmoid(h)
-
-        return geo_feat
-
-
-    def rgb(self, x, d, c=None, shading='full'):
-
-        # color
-        geo_feat = self.geo_feat(x, c)
-        diffuse = geo_feat[..., :3]
-
-        if shading == 'diffuse':
-            color = diffuse
-            specular = None
-        else: 
-            d = self.encoder_dir(d)
-            specular = self.specular_net(torch.cat([d, geo_feat[..., 3:]], dim=-1))
-            specular = torch.sigmoid(specular)
-            if shading == 'specular':
-                color = specular
-            else: # full
-                color = (specular + diffuse).clamp(0, 1) # specular + albedo
-
-        return color, specular
-
-
     # optimizer utils
     def get_params(self, lr):
 
@@ -194,13 +175,12 @@ class NeRFNetwork(NeRFRenderer):
 
         params.extend([
             {'params': self.encoder.parameters(), 'lr': lr},
-            {'params': self.encoder_color.parameters(), 'lr': lr},
-            {'params': self.sigma_net.parameters(), 'lr': lr},
-            {'params': self.color_net.parameters(), 'lr': lr}, 
-            {'params': self.specular_net.parameters(), 'lr': lr}, 
+            {'params': self.encoder_material.parameters(), 'lr': lr},
+            {'params': self.sdf_net.parameters(), 'lr': lr},
+            {'params': self.material_net.parameters(), 'lr': lr}, 
+            {'params': self.diffuse_light_net.parameters(), 'lr': lr}, 
+            {'params': self.specular_light_net.parameters(), 'lr': lr}, 
+            {'params': self.variance, 'lr': lr * 0.1}
         ])
-
-        if self.opt.sdf:
-            params.append({'params': self.variance, 'lr': lr * 0.1})
 
         return params

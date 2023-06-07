@@ -68,6 +68,34 @@ class TCNN_hashgrid(nn.Module):
         return self.encoder((x + bound) / (2 * bound))
 
 
+# ref: IDE in Ref-NeRF
+class IntegratedDirectionalEncoder(nn.Module):
+    def __init__(self, degree):
+        super().__init__()
+
+        from shencoder import SHEncoder
+        self.sh_encoder = SHEncoder(input_dim=3, degree=degree)
+
+        sigma = []
+        for l in range(degree):
+            sigma.extend([0.5 * l * (l + 1)] * (2 * l + 1))
+        self.sigma = torch.tensor(sigma, dtype=torch.float32, device='cuda') # [output_dim,]
+
+        self.degree = degree
+        self.output_dim = self.sh_encoder.output_dim
+    
+    def forward(self, x, r=None):
+        # x: [..., 3], normalized directions
+        # r: [..., 1], roughness
+
+        if r is None:
+            r = torch.ones_like(x[..., :1])
+        
+        att = torch.exp(-self.sigma * r.float())
+        enc = self.sh_encoder(x).float() # [..., C]
+        
+        return att * enc
+
 def get_encoder(encoding, input_dim=3, 
                 output_dim=1, resolution=300, mode='bilinear', # dense grid
                 multires=6, # freq
@@ -89,6 +117,9 @@ def get_encoder(encoding, input_dim=3,
     elif encoding == 'sh':
         from shencoder import SHEncoder
         encoder = SHEncoder(input_dim=input_dim, degree=degree)
+    
+    elif encoding == 'ide':
+        encoder = IntegratedDirectionalEncoder(degree=degree)
 
     elif encoding == 'hashgrid':
         from gridencoder import GridEncoder

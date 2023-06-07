@@ -1,5 +1,10 @@
-# nerf2mesh
+# nerf2mesh (experimental NeRO integration)
 
+## Notable changes for this branch
+* always use SDF mode since we need normal, and don't need to append `--sdf`.
+* if outdoor scene cannot converge, try using `--enable_dense_depth`.
+
+-----
 
 This repository contains a PyTorch re-implementation of the paper: [Delicate Textured Mesh Recovery from NeRF via Adaptive Surface Refinement](https://arxiv.org/abs/2303.02091).
 

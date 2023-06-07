@@ -63,7 +63,7 @@ class SHEncoder(nn.Module):
         super().__init__()
 
         self.input_dim = input_dim # coord dims, must be 3
-        self.degree = degree # 0 ~ 4
+        self.degree = degree # 0 ~ 8
         self.output_dim = degree ** 2
 
         assert self.input_dim == 3, "SH encoder only support input dim == 3"
@@ -77,9 +77,6 @@ class SHEncoder(nn.Module):
         # return: [..., degree^2]
 
         inputs = inputs / size # [-1, 1]
-
-        # normalize
-        inputs = inputs / torch.norm(inputs, dim=-1, keepdim=True) 
 
         prefix_shape = list(inputs.shape[:-1])
         inputs = inputs.reshape(-1, self.input_dim)

@@ -17,7 +17,6 @@ if __name__ == '__main__':
     parser.add_argument('--stage', type=int, default=0, help="training stage")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--fp16', action='store_true', help="use amp mixed precision training")
-    parser.add_argument('--sdf', action='store_true', help="use sdf instead of density for nerf")
     parser.add_argument('--tcnn', action='store_true', help="use tcnn's gridencoder")
     parser.add_argument('--progressive_level', action='store_true', help="progressively increase max_level")
 
@@ -44,8 +43,8 @@ if __name__ == '__main__':
     parser.add_argument('--enable_dense_depth', action='store_true', help="use dense depth from omnidepth calibrated to colmap pts3d, only valid if using --data_formt colmap")
 
     ### training options
-    parser.add_argument('--iters', type=int, default=30000, help="training iters")
-    parser.add_argument('--lr', type=float, default=1e-2, help="initial learning rate")
+    parser.add_argument('--iters', type=int, default=20000, help="training iters")
+    parser.add_argument('--lr', type=float, default=1e-3, help="initial learning rate")
     parser.add_argument('--lr_vert', type=float, default=1e-4, help="initial learning rate for vert optimization")
     parser.add_argument('--pos_gradient_boost', type=float, default=1, help="nvdiffrast option")
     parser.add_argument('--cuda_ray', action='store_true', help="use CUDA raymarching instead of pytorch")
@@ -73,7 +72,7 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_entropy', type=float, default=0, help="loss scale")
     parser.add_argument('--lambda_tv', type=float, default=1e-8, help="loss scale")
     parser.add_argument('--lambda_depth', type=float, default=0.1, help="loss scale")
-    parser.add_argument('--lambda_specular', type=float, default=1e-5, help="loss scale")
+    parser.add_argument('--lambda_specular', type=float, default=0, help="loss scale")
     parser.add_argument('--lambda_eikonal', type=float, default=0.1, help="loss scale")
     parser.add_argument('--lambda_rgb', type=float, default=1, help="loss scale")
     parser.add_argument('--lambda_mask', type=float, default=0.1, help="loss scale")
@@ -82,8 +81,8 @@ if __name__ == '__main__':
     parser.add_argument('--wo_smooth', action='store_true', help="disable all smoothness regularizations")
     parser.add_argument('--lambda_lpips', type=float, default=0, help="loss scale")
     parser.add_argument('--lambda_offsets', type=float, default=0.1, help="loss scale")
-    parser.add_argument('--lambda_lap', type=float, default=0.001, help="loss scale")
-    parser.add_argument('--lambda_normal', type=float, default=0, help="loss scale")
+    parser.add_argument('--lambda_lap', type=float, default=0.05, help="loss scale")
+    parser.add_argument('--lambda_normal', type=float, default=0.05, help="loss scale")
     parser.add_argument('--lambda_edgelen', type=float, default=0, help="loss scale")
 
     # unused
@@ -105,13 +104,11 @@ if __name__ == '__main__':
     parser.add_argument('--clean_min_d', type=int, default=5, help="mesh clean: min diameter for isolated mesh")
 
     # stage 1
-    parser.add_argument('--ssaa', type=int, default=2, help="super sampling anti-aliasing ratio")
+    parser.add_argument('--ssaa', type=int, default=1, help="super sampling anti-aliasing ratio")
     parser.add_argument('--texture_size', type=int, default=4096, help="exported texture resolution")
     parser.add_argument('--refine', action='store_true', help="track face error and do subdivision")
-    parser.add_argument("--refine_steps_ratio", type=float, action="append", default=[0.1, 0.2, 0.3, 0.4, 0.5, 0.7])
-    parser.add_argument('--refine_size', type=float, default=0.01, help="refine trig length")
-    parser.add_argument('--refine_decimate_ratio', type=float, default=0.1, help="refine decimate ratio")
-    parser.add_argument('--refine_remesh_size', type=float, default=0.02, help="remesh trig length")
+    parser.add_argument("--refine_steps_ratio", type=float, action="append", default=[0.25, 0.5, 0.75])
+    parser.add_argument('--refine_remesh_size', type=float, default=0.01, help="remesh trig length")
 
     ### GUI options
     parser.add_argument('--vis_pose', action='store_true', help="visualize the poses")
@@ -124,34 +121,27 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
-    opt.cuda_ray = True
+    # opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
+    # opt.lambda_tv = 0 # tcnn does not support inplace TV
+    opt.density_thresh = 0.001 # use smaller thresh to suit density scale from sdf
+    if opt.stage == 0:
+        opt.progressive_level = True
+
+    # contract background
+    if opt.bound > 1:
+        opt.contract = True
+    
+    opt.enable_offset_nerf_grad = True # lead to more sharp texture
 
     if opt.O:
         opt.fp16 = True
         opt.preload = True
         opt.mark_untrained = True
         opt.random_image_batch = True
-        opt.mesh_visibility_culling = True
+        # opt.mesh_visibility_culling = True
         opt.adaptive_num_rays = True
         opt.refine = True
     
-    if opt.sdf:
-        # opt.tcnn = True # tcnn supports 2nd order gradient, which is faster than finite difference.
-        # opt.lambda_tv = 0 # tcnn does not support inplace TV
-        opt.density_thresh = 0.001 # use smaller thresh to suit density scale from sdf
-        if opt.stage == 0:
-            opt.progressive_level = True
-
-        # contract background
-        if opt.bound > 1:
-            opt.contract = True
-        
-        opt.enable_offset_nerf_grad = True # lead to more sharp texture
-
-        # just perform remesh periodically
-        opt.refine_decimate_ratio = 0 # disable decimation
-        opt.refine_size = 0 # disable subdivision
-        
     if opt.contract:
         # mark untrained is not very correct in contraction mode...
         opt.mark_untrained = False
@@ -251,16 +241,16 @@ if __name__ == '__main__':
             trainer.train(train_loader, valid_loader, max_epoch)
             
             # last validation
-            trainer.metrics = [PSNRMeter(), SSIMMeter(), LPIPSMeter(device=device)]
-            trainer.evaluate(valid_loader)
+            # trainer.metrics = [PSNRMeter(), SSIMMeter(), LPIPSMeter(device=device)]
+            # trainer.evaluate(valid_loader)
 
             # also test
-            test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
+            # test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
             
-            if test_loader.has_gt:
-                trainer.evaluate(test_loader) # blender has gt, so evaluate it.
+            # if test_loader.has_gt:
+            #     trainer.evaluate(test_loader) # blender has gt, so evaluate it.
             
-            trainer.test(test_loader, write_video=True) # test and save video
+            # trainer.test(test_loader, write_video=True) # test and save video
             
             if opt.stage == 1:
                 trainer.export_stage1(resolution=opt.texture_size)

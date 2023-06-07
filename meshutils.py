@@ -1,7 +1,7 @@
 import numpy as np
 import pymeshlab as pml
 
-def isotropic_explicit_remeshing(verts, faces):
+def isotropic_explicit_remeshing(verts, faces, remesh_size=0.01):
 
     _ori_vert_shape = verts.shape
     _ori_face_shape = faces.shape
@@ -12,7 +12,7 @@ def isotropic_explicit_remeshing(verts, faces):
 
     # filters
     # ms.apply_coord_taubin_smoothing()
-    ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.Percentage(1))
+    ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(remesh_size))
 
     # extract mesh
     m = ms.current_mesh()

@@ -238,19 +238,6 @@ class NeRFGUI:
                         dpg.add_button(label="start", tag="_button_train", callback=callback_train)
                         dpg.bind_item_theme("_button_train", theme_button)
 
-                        def callback_reset(sender, app_data):
-                            @torch.no_grad()
-                            def weight_reset(m: nn.Module):
-                                reset_parameters = getattr(m, "reset_parameters", None)
-                                if callable(reset_parameters):
-                                    m.reset_parameters()
-                            self.trainer.model.apply(fn=weight_reset)
-                            self.trainer.model.reset_extra_state() # for cuda_ray density_grid and step_counter
-                            self.need_update = True
-
-                        dpg.add_button(label="reset", tag="_button_reset", callback=callback_reset)
-                        dpg.bind_item_theme("_button_reset", theme_button)
-
                     # save ckpt
                     with dpg.group(horizontal=True):
                         dpg.add_text("Checkpoint: ")
