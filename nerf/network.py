@@ -109,7 +109,9 @@ class NeRFNetwork(NeRFRenderer):
 
     # init the sdf to two spheres by pretraining, assume view cameras fall between the spheres
     def init_double_sphere(self, r1=0.5, r2=1.5, iters=8192, batch_size=8192):
-        assert self.opt.sdf, 'sphere init is only for sdf mode!'
+        # sphere init is only for sdf mode!
+        if not self.opt.sdf:
+            return
         # import kiui
         import tqdm
         loss_fn = torch.nn.MSELoss()
