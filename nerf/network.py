@@ -64,7 +64,8 @@ class NeRFNetwork(NeRFRenderer):
 
         # density network
         self.encoder, self.in_dim_density = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=1, desired_resolution=2048 * self.bound, interpolation='linear')
-        self.sigma_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=self.opt.sdf, geom_init=self.opt.sdf, weight_norm=self.opt.sdf)
+        # self.sigma_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=self.opt.sdf, geom_init=self.opt.sdf, weight_norm=self.opt.sdf)
+        self.sigma_net = MLP(3 + self.in_dim_density, 1, 32, 2, bias=False)
 
         # color network
         self.encoder_color, self.in_dim_color = get_encoder("hashgrid_tcnn" if self.opt.tcnn else "hashgrid", level_dim=2, desired_resolution=2048 * self.bound, interpolation='linear')
@@ -76,7 +77,6 @@ class NeRFNetwork(NeRFRenderer):
         # sdf
         if self.opt.sdf:
             self.register_parameter('variance', nn.Parameter(torch.tensor(0.3, dtype=torch.float32)))
-
 
     def forward(self, x, d, c=None, shading='full'):
         # x: [N, 3], in [-bound, bound]
@@ -92,7 +92,7 @@ class NeRFNetwork(NeRFRenderer):
     def density(self, x):
 
         # sigma
-        h = self.encoder(x, bound=self.bound)
+        h = self.encoder(x, bound=self.bound, max_level=self.max_level)
         h = torch.cat([x, h], dim=-1)
         h = self.sigma_net(h)
 
@@ -106,6 +106,30 @@ class NeRFNetwork(NeRFRenderer):
         results['sigma'] = sigma
 
         return results
+
+    # init the sdf to two spheres by pretraining, assume view cameras fall between the spheres
+    def init_double_sphere(self, r1=0.5, r2=1.5, iters=8192, batch_size=8192):
+        # sphere init is only for sdf mode!
+        if not self.opt.sdf:
+            return
+        # import kiui
+        import tqdm
+        loss_fn = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-3)
+        pbar = tqdm.trange(iters, bar_format='{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+        for _ in range(iters):
+            # random points inside [-b, b]^3
+            xyzs = torch.rand(batch_size, 3, device='cuda') * 2 * self.bound - self.bound
+            d = torch.norm(xyzs, p=2, dim=-1)
+            gt_sdf = torch.where(d < (r1 + r2) / 2, d - r1, r2 - d)
+            # kiui.lo(xyzs, gt_sdf)
+            pred_sdf = self.density(xyzs)['sigma']
+            loss = loss_fn(pred_sdf, gt_sdf)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            pbar.set_description(f'pretrain sdf loss={loss.item():.8f}')
+            pbar.update(1)
     
     # finite difference
     def normal(self, x, epsilon=1e-4):
@@ -134,7 +158,7 @@ class NeRFNetwork(NeRFRenderer):
 
     def geo_feat(self, x, c=None):
 
-        h = self.encoder_color(x, bound=self.bound)
+        h = self.encoder_color(x, bound=self.bound, max_level=self.max_level)
         h = torch.cat([x, h], dim=-1)
         if c is not None:
             h = torch.cat([h, c.repeat(x.shape[0], 1) if c.shape[0] == 1 else c], dim=-1)

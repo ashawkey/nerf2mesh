@@ -513,10 +513,6 @@ class Trainer(object):
         self.device = device if device is not None else torch.device(f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
-        # try out torch 2.0 [no significant acc for V100...]
-        if torch.__version__[0] == '2':
-            model = torch.compile(model)
-
         model.to(self.device)
         if self.world_size > 1:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -594,6 +590,8 @@ class Trainer(object):
 
             if self.use_checkpoint == "scratch":
                 self.log("[INFO] Training from scratch ...")
+                if self.opt.stage == 0:
+                    self.model.init_double_sphere()
             elif self.use_checkpoint == "latest":
                 self.log("[INFO] Loading latest checkpoint ...")
                 self.load_checkpoint()
@@ -651,7 +649,10 @@ class Trainer(object):
 
         if self.opt.sdf:
             self.opt.cos_anneal_ratio = min(1, self.global_step / (0.5 * self.opt.iters))
-            self.opt.normal_anneal_epsilon = 1e-3 * (1 - min(0.9, self.global_step / (0.5 * self.opt.iters)))
+            self.opt.normal_anneal_epsilon = 1e-1 * (1 - min(0.999, self.global_step / (0.5 * self.opt.iters)))
+        
+        if self.opt.progressive_level:
+            self.model.max_level = 4 + int(12 * min(1, self.global_step / (0.5 * self.opt.iters)))
 
         if self.opt.background == 'white':
             bg_color = 1
@@ -1413,6 +1414,8 @@ class Trainer(object):
                 self.log(f"[INFO] Latest checkpoint is {checkpoint}")
             else:
                 self.log("[WARN] No checkpoint found, abort loading latest model.")
+                if self.opt.stage == 0:
+                    self.model.init_double_sphere()
                 return
 
         checkpoint_dict = torch.load(checkpoint, map_location=self.device)
