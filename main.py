@@ -202,7 +202,7 @@ if __name__ == '__main__':
                 test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
 
                 if test_loader.has_gt:
-                    trainer.metrics = [PSNRMeter(), SSIMMeter(), LPIPSMeter(device=device)] # set up metrics
+                    trainer.metrics = [PSNRMeter(), LPIPSMeter(device=device)] # set up metrics
                     trainer.evaluate(test_loader) # blender has gt, so evaluate it.
 
                 trainer.test(test_loader, write_video=True) # test and save video
@@ -251,7 +251,7 @@ if __name__ == '__main__':
             trainer.train(train_loader, valid_loader, max_epoch)
             
             # last validation
-            trainer.metrics = [PSNRMeter(), SSIMMeter(), LPIPSMeter(device=device)]
+            trainer.metrics = [PSNRMeter(), LPIPSMeter(device=device)]
             trainer.evaluate(valid_loader)
 
             # also test

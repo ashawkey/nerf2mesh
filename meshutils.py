@@ -12,7 +12,7 @@ def isotropic_explicit_remeshing(verts, faces):
 
     # filters
     # ms.apply_coord_taubin_smoothing()
-    ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.Percentage(1))
+    ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.PercentageValue(1))
 
     # extract mesh
     m = ms.current_mesh()
@@ -43,12 +43,12 @@ def decimate_mesh(verts, faces, target, backend='pymeshlab', remesh=False, optim
         ms.add_mesh(m, 'mesh') # will copy!
 
         # filters
-        # ms.meshing_decimation_clustering(threshold=pml.Percentage(1))
+        # ms.meshing_decimation_clustering(threshold=pml.PercentageValue(1))
         ms.meshing_decimation_quadric_edge_collapse(targetfacenum=int(target), optimalplacement=optimalplacement)
 
         if remesh:
             ms.apply_coord_taubin_smoothing()
-            ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.Percentage(1))
+            ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.PercentageValue(1))
 
         # extract mesh
         m = ms.current_mesh()
@@ -158,13 +158,13 @@ def clean_mesh(verts, faces, v_pct=1, min_f=8, min_d=5, repair=True, remesh=True
     ms.meshing_remove_unreferenced_vertices() # verts not refed by any faces
 
     if v_pct > 0:
-        ms.meshing_merge_close_vertices(threshold=pml.Percentage(v_pct)) # 1/10000 of bounding box diagonal
+        ms.meshing_merge_close_vertices(threshold=pml.PercentageValue(v_pct)) # 1/10000 of bounding box diagonal
 
     ms.meshing_remove_duplicate_faces() # faces defined by the same verts
     ms.meshing_remove_null_faces() # faces with area == 0
 
     if min_d > 0:
-        ms.meshing_remove_connected_component_by_diameter(mincomponentdiag=pml.Percentage(min_d))
+        ms.meshing_remove_connected_component_by_diameter(mincomponentdiag=pml.PercentageValue(min_d))
     
     if min_f > 0:
         ms.meshing_remove_connected_component_by_face_number(mincomponentsize=min_f)
@@ -176,7 +176,7 @@ def clean_mesh(verts, faces, v_pct=1, min_f=8, min_d=5, repair=True, remesh=True
     
     if remesh:
         # ms.apply_coord_taubin_smoothing()
-        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.Percentage(1))
+        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.PercentageValue(1))
 
     # extract mesh
     m = ms.current_mesh()
@@ -206,7 +206,7 @@ def decimate_and_refine_mesh(verts, faces, mask, decimate_ratio=0.1, refine_size
         ms.meshing_decimation_quadric_edge_collapse(targetfacenum=int((1 - decimate_ratio) * (mask == 1).sum()), selected=True)
 
     if refine_remesh_size > 0:
-        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(refine_remesh_size), selectedonly=True)
+        ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.PureValue(refine_remesh_size), selectedonly=True)
 
     # repair
     ms.set_selection_none(allfaces=True)
@@ -216,9 +216,9 @@ def decimate_and_refine_mesh(verts, faces, mask, decimate_ratio=0.1, refine_size
     # refine 
     if refine_size > 0:
         ms.compute_selection_by_condition_per_face(condselect='fq == 2')
-        ms.meshing_surface_subdivision_midpoint(threshold=pml.AbsoluteValue(refine_size), selected=True)
+        ms.meshing_surface_subdivision_midpoint(threshold=pml.PureValue(refine_size), selected=True)
 
-        # ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.AbsoluteValue(refine_size), selectedonly=True)
+        # ms.meshing_isotropic_explicit_remeshing(iterations=3, targetlen=pml.PureValue(refine_size), selectedonly=True)
 
     # extract mesh
     m = ms.current_mesh()

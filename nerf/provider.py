@@ -217,6 +217,14 @@ class NeRFDataset:
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 else:
                     image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
+                
+                # if mask is available, load as the alpha channel
+                m_path = f_path.replace('images', 'mask')
+                if os.path.exists(m_path):
+                    mask = cv2.imread(m_path, cv2.IMREAD_UNCHANGED) # [H, W]
+                    if len(mask.shape) == 2: 
+                        mask = mask[..., None]
+                    image = np.concatenate([image, mask[..., :1]], axis=-1)
 
                 if image.shape[0] != self.H or image.shape[1] != self.W:
                     image = cv2.resize(image, (self.W, self.H), interpolation=cv2.INTER_AREA)
